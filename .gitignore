@@ -42,5 +42,13 @@ app-example
 /ios
 /android
 
+# Native module gradle outputs (modules/*/android/ source is tracked, build artifacts are not)
+**/android/build/
+**/android/.gradle/
+**/android/.cxx/
+
+# Claude Code — keep settings.json shared, ignore per-machine local settings
+.claude/settings.local.json
+
 # IDE
 .idea/

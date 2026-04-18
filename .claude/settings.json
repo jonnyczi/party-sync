@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(adb:*)",
+      "Bash(emulator:*)",
+      "Bash(nix develop:*)",
+      "Bash(nix flake:*)"
+    ]
+  }
+}
