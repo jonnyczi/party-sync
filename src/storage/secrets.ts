@@ -1,7 +1,8 @@
 import * as SecureStore from 'expo-secure-store';
 
 function key(serverId: number): string {
-  return `server:${serverId}:pw`;
+  // SecureStore restricts keys to [A-Za-z0-9._-]; ':' is rejected.
+  return `server_${serverId}_pw`;
 }
 
 export async function getServerPassword(
