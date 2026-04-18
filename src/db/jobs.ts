@@ -1,0 +1,104 @@
+import type { SqliteDb } from './adapter';
+import type { JobRow, SourceKind } from './types';
+
+export interface JobInput {
+  server_id: number;
+  name: string;
+  source_kind: SourceKind;
+  source_uri: string;
+  remote_path: string;
+  propagate_deletes?: boolean;
+  wifi_only?: boolean;
+  respect_data_saver?: boolean;
+  charging_only?: boolean;
+  rehash_interval_days?: number;
+}
+
+function bool(v: boolean | undefined, fallback: number): number {
+  return v === undefined ? fallback : v ? 1 : 0;
+}
+
+export async function listJobs(db: SqliteDb): Promise<JobRow[]> {
+  return db.getAllAsync<JobRow>(
+    'SELECT * FROM jobs ORDER BY updated_at DESC, id DESC',
+    [],
+  );
+}
+
+export async function listJobsForServer(
+  db: SqliteDb,
+  serverId: number,
+): Promise<JobRow[]> {
+  return db.getAllAsync<JobRow>(
+    'SELECT * FROM jobs WHERE server_id = ? ORDER BY updated_at DESC, id DESC',
+    [serverId],
+  );
+}
+
+export async function getJob(
+  db: SqliteDb,
+  id: number,
+): Promise<JobRow | null> {
+  return db.getFirstAsync<JobRow>('SELECT * FROM jobs WHERE id = ?', [id]);
+}
+
+export async function createJob(
+  db: SqliteDb,
+  input: JobInput,
+): Promise<number> {
+  const now = Date.now();
+  const res = await db.runAsync(
+    `INSERT INTO jobs (
+       server_id, name, source_kind, source_uri, remote_path,
+       propagate_deletes, wifi_only, respect_data_saver, charging_only,
+       rehash_interval_days, created_at, updated_at
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      input.server_id,
+      input.name,
+      input.source_kind,
+      input.source_uri,
+      input.remote_path,
+      bool(input.propagate_deletes, 0),
+      bool(input.wifi_only, 1),
+      bool(input.respect_data_saver, 1),
+      bool(input.charging_only, 0),
+      input.rehash_interval_days ?? 30,
+      now,
+      now,
+    ],
+  );
+  return res.lastInsertRowId;
+}
+
+export async function updateJob(
+  db: SqliteDb,
+  id: number,
+  input: JobInput,
+): Promise<void> {
+  await db.runAsync(
+    `UPDATE jobs SET
+       server_id = ?, name = ?, source_kind = ?, source_uri = ?, remote_path = ?,
+       propagate_deletes = ?, wifi_only = ?, respect_data_saver = ?, charging_only = ?,
+       rehash_interval_days = ?, updated_at = ?
+     WHERE id = ?`,
+    [
+      input.server_id,
+      input.name,
+      input.source_kind,
+      input.source_uri,
+      input.remote_path,
+      bool(input.propagate_deletes, 0),
+      bool(input.wifi_only, 1),
+      bool(input.respect_data_saver, 1),
+      bool(input.charging_only, 0),
+      input.rehash_interval_days ?? 30,
+      Date.now(),
+      id,
+    ],
+  );
+}
+
+export async function deleteJob(db: SqliteDb, id: number): Promise<void> {
+  await db.runAsync('DELETE FROM jobs WHERE id = ?', [id]);
+}

@@ -1,0 +1,64 @@
+export interface ServerRow {
+  id: number;
+  name: string;
+  base_url: string;
+  username: string | null;
+  cert_sha256: string | null;
+  created_at: number;
+  updated_at: number;
+}
+
+export type SourceKind = 'saf' | 'media';
+
+export interface JobRow {
+  id: number;
+  server_id: number;
+  name: string;
+  source_kind: SourceKind;
+  source_uri: string;
+  remote_path: string;
+  propagate_deletes: number;
+  wifi_only: number;
+  respect_data_saver: number;
+  charging_only: number;
+  rehash_interval_days: number;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface FileStateRow {
+  job_id: number;
+  local_path: string;
+  size: number;
+  mtime_ms: number;
+  wark: string | null;
+  last_hashed_at: number | null;
+  uploaded_at: number | null;
+}
+
+export type RunTrigger = 'manual' | 'periodic' | 'observer';
+export type RunStatus = 'running' | 'ok' | 'partial' | 'failed';
+export type ErrorPhase = 'stat' | 'hash' | 'handshake' | 'upload' | 'finalize';
+
+export interface RunRow {
+  id: number;
+  job_id: number;
+  started_at: number;
+  finished_at: number | null;
+  trigger: RunTrigger;
+  status: RunStatus;
+  files_scanned: number;
+  files_uploaded: number;
+  files_skipped: number;
+  files_failed: number;
+  bytes_uploaded: number;
+}
+
+export interface RunErrorRow {
+  id: number;
+  run_id: number;
+  local_path: string;
+  phase: ErrorPhase;
+  http_status: number | null;
+  message: string | null;
+}
