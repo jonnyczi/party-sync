@@ -1,0 +1,6 @@
+{
+  "platforms": ["android"],
+  "android": {
+    "modules": ["expo.modules.copypartysha512.CopypartySha512Module"]
+  }
+}

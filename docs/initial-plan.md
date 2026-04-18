@@ -36,7 +36,7 @@ Confirmed against `/tmp/copyparty` clone. Cite-everything:
 
 - **SHA-512** per chunk (`copyparty/web/up2k.js:2246` — `subtle.digest('SHA-512', buf)` or `hashwasm.sha512` fallback at `:2250`).
 - Hash encoding is **base64url (no padding)**, standard URL-safe alphabet. Implementation at `up2k.js:2033-2068` (`buf2b64`).
-- Hash length per chunk = **43 chars** (256 bits). copyparty **truncates** the 512-bit SHA-512 to 32 bytes before base64url-encoding (confirmed by wire samples in `docs/up2k.txt:6,10-12,88-94`, which are exactly 43 chars each). Implementation detail to verify during impl: grep `buf2b64` call sites for slice length.
+- Hash length per chunk = **44 chars**. copyparty **truncates** the 512-bit SHA-512 to **33 bytes** before base64url-encoding it (33 is divisible by 3, so the encoding is exactly 44 chars and needs no padding). Confirmed at `up2k.js:2218` (`new Uint8Array(hashbuf).subarray(0, 33)`) and server-side at `up2k.py:5716` (`hashlib.sha512(...).digest()[:33]`).
 - The full list of chunk hashes (in order) is sent in the handshake. The server derives the **wark** (session id) from `sha512(salt + filesize + chunk_hashes)` — we don't generate it; we receive it.
 
 ### Handshake

@@ -1,0 +1,31 @@
+---
+services:
+  copyparty:
+    image: copyparty/ac:latest
+    container_name: copyparty-test
+    ports:
+      - "3923:3923"
+    volumes:
+      - copyparty-data:/w
+    command:
+      - "-p"
+      - "3923"
+      - "-i"
+      - "0.0.0.0"
+      - "-a"
+      - "test:testpw"
+      - "-v"
+      - "/w::A,test"
+      - "--no-mutagen"
+      - "--no-thumb"
+    environment:
+      PYTHONUNBUFFERED: "1"
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider -q 127.0.0.1:3923/?reset=/._"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+      start_period: 5s
+
+volumes:
+  copyparty-data:
