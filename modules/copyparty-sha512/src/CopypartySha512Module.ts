@@ -16,6 +16,22 @@ declare class CopypartySha512Module extends NativeModule<CopypartySha512ModuleEv
 
   /** Resolve the size in bytes of `uri`. */
   size(uri: string): Promise<number>;
+
+  /**
+   * Walk a SAF tree URI and return one entry per FILE under it. Directories
+   * are recursed into and not emitted. `relativePath` is slash-joined under
+   * the tree root (never starts with `/`). `mtimeMs` is the provider's last-
+   * modified value (0 / -1 if not supplied). Android-only; iOS parity is
+   * deferred with the rest of iOS support.
+   */
+  walkTree(treeUri: string): Promise<SafWalkEntry[]>;
+}
+
+export interface SafWalkEntry {
+  uri: string;
+  relativePath: string;
+  size: number;
+  mtimeMs: number;
 }
 
 export default requireNativeModule<CopypartySha512Module>('CopypartySha512');

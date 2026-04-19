@@ -5,6 +5,7 @@ import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
 import android.util.Base64
+import androidx.documentfile.provider.DocumentFile
 import expo.modules.kotlin.exception.CodedException
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
@@ -37,6 +38,10 @@ class CopypartySha512Module : Module() {
     AsyncFunction("size") { uri: String ->
       // Returned as Double so JS sees a Number; safe up to 2^53 bytes.
       fileSize(parseUri(uri)).toDouble()
+    }
+
+    AsyncFunction("walkTree") { treeUri: String ->
+      walkTree(treeUri)
     }
   }
 
@@ -133,6 +138,49 @@ class CopypartySha512Module : Module() {
       }
       out
     }
+  }
+
+  /**
+   * Walk a SAF tree URI and return one entry per FILE under the tree (dirs
+   * are recursed into, not emitted). `relativePath` is a forward-slash path
+   * rooted at the tree. `size` and `mtimeMs` come from `DocumentFile` and
+   * are `Double`s on the JS side; `-1` means the provider didn't supply a
+   * value, which expo-file-system's SAF impl already tolerates. Returning a
+   * flat list (vs. streaming) is fine for v1 — user-picked folders are
+   * ~thousands of files, not millions; camera-roll enumeration happens via
+   * MediaLibrary in a later phase.
+   */
+  private fun walkTree(treeUri: String): List<Map<String, Any>> {
+    val parsed = Uri.parse(treeUri)
+    val root = DocumentFile.fromTreeUri(context, parsed)
+      ?: throw HashException("not a SAF tree uri: $treeUri")
+    if (!root.exists() || !root.isDirectory) {
+      throw HashException("tree not accessible or not a directory: $treeUri")
+    }
+
+    val out = ArrayList<Map<String, Any>>()
+    val stack = ArrayDeque<Pair<DocumentFile, String>>()
+    stack.addLast(root to "")
+    while (stack.isNotEmpty()) {
+      val (dir, prefix) = stack.removeLast()
+      for (child in dir.listFiles()) {
+        val name = child.name ?: continue
+        val rel = if (prefix.isEmpty()) name else "$prefix/$name"
+        when {
+          child.isDirectory -> stack.addLast(child to rel)
+          child.isFile -> out.add(
+            mapOf(
+              "uri" to child.uri.toString(),
+              "relativePath" to rel,
+              "size" to child.length().toDouble(),
+              "mtimeMs" to child.lastModified().toDouble(),
+            ),
+          )
+          else -> { /* broken document — skip */ }
+        }
+      }
+    }
+    return out
   }
 
   private fun encodeTruncated(md: MessageDigest): String {
