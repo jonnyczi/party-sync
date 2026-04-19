@@ -491,13 +491,24 @@ export default function JobEditScreen() {
                   <ThemedText style={styles.hint}>No runs yet.</ThemedText>
                 ) : (
                   runHistory.map((r) => (
-                    <View key={r.id} style={styles.runHistoryRow}>
+                    <Pressable
+                      key={r.id}
+                      onPress={() => router.push(`/run/${r.id}`)}
+                      style={({ pressed }) => [
+                        styles.runHistoryRow,
+                        { opacity: pressed ? 0.6 : 1 },
+                      ]}>
                       <StatusDot status={r.status} />
                       <ThemedText style={styles.runHistoryText} numberOfLines={1}>
                         {new Date(r.started_at).toLocaleString()} · {r.status} ·{' '}
                         {r.files_uploaded}↑ / {r.files_skipped}= / {r.files_failed}✗
                       </ThemedText>
-                    </View>
+                      <IconSymbol
+                        name="chevron.right"
+                        color={Colors[scheme].icon}
+                        size={16}
+                      />
+                    </Pressable>
                   ))
                 )}
               </View>
@@ -589,7 +600,11 @@ function LastRunPanel({
             {errors.length} error{errors.length === 1 ? '' : 's'}:
           </ThemedText>
           {errors.slice(0, 5).map((e) => (
-            <ThemedText key={e.id} style={styles.errorText} numberOfLines={2}>
+            <ThemedText
+              key={e.id}
+              style={styles.errorText}
+              selectable
+              numberOfLines={2}>
               {e.phase}: {e.local_path || '(run)'} — {e.message ?? `HTTP ${e.http_status}`}
             </ThemedText>
           ))}
