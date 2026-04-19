@@ -16,6 +16,7 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { testServerConnection } from '@/src/copyparty/test-connection';
 import {
   createServer,
   deleteServer,
@@ -24,6 +25,7 @@ import {
 } from '@/src/db/servers';
 import {
   deleteServerPassword,
+  getServerPassword,
   setServerPassword,
 } from '@/src/storage/secrets';
 
@@ -54,6 +56,10 @@ export default function ServerEditScreen() {
   const [certSha, setCertSha] = useState('');
   const [loaded, setLoaded] = useState(isNew);
   const [saving, setSaving] = useState(false);
+  const [testing, setTesting] = useState(false);
+  // Tracks whether a stored password exists for the edited server. Used to
+  // enable the Test button when the password field is blank (edit mode).
+  const [hasStoredSecret, setHasStoredSecret] = useState(false);
 
   useEffect(() => {
     if (isNew || serverId === null) return;
@@ -69,6 +75,7 @@ export default function ServerEditScreen() {
       setCertSha(row.cert_sha256 ?? '');
       setLoaded(true);
     });
+    getServerPassword(serverId).then((pw) => setHasStoredSecret(!!pw));
   }, [db, isNew, serverId, router]);
 
   const passwordRequired = isNew;
@@ -114,6 +121,36 @@ export default function ServerEditScreen() {
       );
     } finally {
       setSaving(false);
+    }
+  };
+
+  const canTest =
+    !testing &&
+    baseUrl.trim().length > 0 &&
+    (password.length > 0 || (!isNew && hasStoredSecret));
+
+  const onTest = async () => {
+    if (!canTest) return;
+    setTesting(true);
+    try {
+      if (!/^https?:\/\//i.test(baseUrl.trim())) {
+        Alert.alert('Test failed', 'URL must start with http:// or https://.');
+        return;
+      }
+      let pw = password;
+      if (!pw && !isNew && serverId !== null) {
+        pw = (await getServerPassword(serverId)) ?? '';
+      }
+      await testServerConnection({
+        baseUrl: normalizeBaseUrl(baseUrl),
+        password: pw,
+        certSha256: certSha.trim() ? normalizeFingerprint(certSha) : null,
+      });
+      Alert.alert('Connection OK', 'Server responded and auth was accepted.');
+    } catch (e) {
+      Alert.alert('Test failed', e instanceof Error ? e.message : String(e));
+    } finally {
+      setTesting(false);
     }
   };
 
@@ -254,6 +291,25 @@ export default function ServerEditScreen() {
             ) : null}
           </Field>
 
+          <Pressable
+            onPress={onTest}
+            disabled={!canTest}
+            style={({ pressed }) => [
+              styles.testBtn,
+              {
+                borderColor: canTest ? Colors[scheme].tint : Colors[scheme].icon,
+                opacity: pressed ? 0.7 : 1,
+              },
+            ]}>
+            <ThemedText
+              style={{
+                color: canTest ? Colors[scheme].tint : Colors[scheme].icon,
+                fontWeight: '600',
+              }}>
+              {testing ? 'Testing…' : 'Test connection'}
+            </ThemedText>
+          </Pressable>
+
           {!isNew ? (
             <Pressable
               onPress={confirmDelete}
@@ -295,8 +351,15 @@ const styles = StyleSheet.create({
   passwordInput: { flex: 1 },
   revealBtn: { paddingHorizontal: 8, paddingVertical: 8 },
   errorText: { color: '#c33', fontSize: 12 },
+  testBtn: {
+    marginTop: 8,
+    padding: 14,
+    borderRadius: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+    alignItems: 'center',
+  },
   deleteBtn: {
-    marginTop: 24,
+    marginTop: 8,
     padding: 14,
     borderRadius: 8,
     borderWidth: StyleSheet.hairlineWidth,

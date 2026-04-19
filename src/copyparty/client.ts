@@ -1,4 +1,9 @@
-import type { HandshakeBody, HandshakeResponse, SearchResponse } from './types';
+import type {
+  HandshakeBody,
+  HandshakeResponse,
+  LsResponse,
+  SearchResponse,
+} from './types';
 import { Up2kError } from './types';
 
 export interface CopypartyClientOptions {
@@ -98,6 +103,27 @@ export class CopypartyClient {
         res.status,
       );
     }
+  }
+
+  /**
+   * GET a folder listing (`?ls`). Used by the pre-flight test buttons to
+   * validate reachability, auth, and — when called against a specific remote
+   * path — the user's permissions on that volume.
+   */
+  async listFolder(folderPath: string): Promise<LsResponse> {
+    const res = await this.fetchImpl(`${this.folderUrl(folderPath)}?ls`, {
+      ...this.fetchInit,
+      method: 'GET',
+      headers: this.headers({}),
+    });
+    if (!res.ok) {
+      throw new Up2kError(
+        `ls ${res.status} ${res.statusText} for ${folderPath}`,
+        'ls',
+        res.status,
+      );
+    }
+    return (await res.json()) as LsResponse;
   }
 
   private headers(extra: Record<string, string>): Record<string, string> {

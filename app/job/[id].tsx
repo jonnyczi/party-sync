@@ -20,6 +20,7 @@ import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useSyncProgress } from '@/hooks/use-sync-progress';
+import { testJobConnection } from '@/src/copyparty/test-connection';
 import { createJob, deleteJob, getJob, updateJob } from '@/src/db/jobs';
 import {
   getLatestRunForJob,
@@ -28,6 +29,7 @@ import {
 } from '@/src/db/runs';
 import { listServers } from '@/src/db/servers';
 import type { RunErrorRow, RunRow, ServerRow } from '@/src/db/types';
+import { getServerPassword } from '@/src/storage/secrets';
 import type { ActiveRunSnapshot } from '@/src/sync/progress';
 import { runJobManual } from '@/src/sync/triggers/manual';
 
@@ -58,6 +60,7 @@ export default function JobEditScreen() {
   // emitting its first progress event; once `progress.activeRun` points at
   // this job the bus takes over as the source of truth.
   const [starting, setStarting] = useState(false);
+  const [testing, setTesting] = useState(false);
   const [latestRun, setLatestRun] = useState<RunRow | null>(null);
   const [runHistory, setRunHistory] = useState<RunRow[]>([]);
   const [latestErrors, setLatestErrors] = useState<RunErrorRow[]>([]);
@@ -162,6 +165,57 @@ export default function JobEditScreen() {
         },
       ],
     );
+  };
+
+  const canTest =
+    !testing &&
+    serverId !== null &&
+    sourceUri.length > 0 &&
+    normalizeRemotePath(remotePath).length > 0;
+
+  const onTest = async () => {
+    if (!canTest || serverId === null) return;
+    setTesting(true);
+    try {
+      const server = servers.find((s) => s.id === serverId);
+      if (!server) {
+        Alert.alert('Test failed', 'Select a server first.');
+        return;
+      }
+      // baseUrl is trusted: it was normalized + validated at server-save time
+      // (see app/server/[id].tsx). No re-check needed here.
+      const pw = (await getServerPassword(serverId)) ?? '';
+      if (!pw) {
+        Alert.alert(
+          'Test failed',
+          'No password stored for this server. Edit the server and re-enter it.',
+        );
+        return;
+      }
+      const remote = normalizeRemotePath(remotePath);
+      const result = await testJobConnection({
+        baseUrl: server.base_url,
+        password: pw,
+        certSha256: server.cert_sha256,
+        remotePath: remote,
+        sourceUri: sourceUri || undefined,
+      });
+      if (!result.localOk) {
+        Alert.alert(
+          'Local folder unavailable',
+          'Remote OK, but the local folder permission is gone. Re-pick it.',
+        );
+      } else {
+        Alert.alert(
+          'Connection OK',
+          `Remote path ${remote} is writable and the local folder is accessible.`,
+        );
+      }
+    } catch (e) {
+      Alert.alert('Test failed', e instanceof Error ? e.message : String(e));
+    } finally {
+      setTesting(false);
+    }
   };
 
   const onSyncNow = async () => {
@@ -295,6 +349,25 @@ export default function JobEditScreen() {
               autoCorrect={false}
             />
           </Field>
+
+          <Pressable
+            onPress={onTest}
+            disabled={!canTest}
+            style={({ pressed }) => [
+              styles.testBtn,
+              {
+                borderColor: canTest ? Colors[scheme].tint : Colors[scheme].icon,
+                opacity: pressed ? 0.7 : 1,
+              },
+            ]}>
+            <ThemedText
+              style={{
+                color: canTest ? Colors[scheme].tint : Colors[scheme].icon,
+                fontWeight: '600',
+              }}>
+              {testing ? 'Testing…' : 'Test connection'}
+            </ThemedText>
+          </Pressable>
 
           {!isNew ? (
             <>
@@ -549,6 +622,12 @@ const styles = StyleSheet.create({
   errorText: { fontSize: 11, color: '#c33' },
   runHistoryRow: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 4 },
   runHistoryText: { flex: 1, fontSize: 12, opacity: 0.8 },
+  testBtn: {
+    padding: 14,
+    borderRadius: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+    alignItems: 'center',
+  },
   deleteBtn: {
     marginTop: 12,
     padding: 14,

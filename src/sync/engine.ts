@@ -198,7 +198,8 @@ async function loadFileState(
 }
 
 function classifyErrorPhase(e: unknown): ErrorPhase {
-  if (e instanceof Up2kError) return e.phase;
+  if (e instanceof Up2kError && e.phase !== 'ls') return e.phase;
+  // 'ls' only fires from the pre-flight Test buttons, never from the engine.
   return 'upload';
 }
 

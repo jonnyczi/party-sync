@@ -42,7 +42,27 @@ export interface ChunkPlan {
   cdr: number;
 }
 
-export type UploadPhase = 'stat' | 'hash' | 'handshake' | 'upload' | 'finalize';
+export type UploadPhase =
+  | 'stat'
+  | 'hash'
+  | 'handshake'
+  | 'upload'
+  | 'finalize'
+  | 'ls';
+
+export interface LsEntry {
+  href: string;
+  sz: number;
+  ts: number;
+}
+
+export interface LsResponse {
+  /** Username the request was authenticated as, or '*' for anonymous. */
+  acct: string;
+  perms: string[];
+  files: LsEntry[];
+  dirs: LsEntry[];
+}
 
 export class Up2kError extends Error {
   constructor(
