@@ -9,8 +9,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `npm run web` — `expo start --web`.
 - `npm run lint` — runs `expo lint` (ESLint via `eslint-config-expo/flat`).
 - `npm run reset-project` — **destructive**: moves or deletes `app/`, `components/`, `hooks/`, `constants/`, `scripts/` (optionally into `app-example/`) and scaffolds a blank `app/`. Only run when the user explicitly asks to reset the template.
-
-No test runner is configured.
+- `npm test` / `npm run test:watch` — vitest unit tests (anything under `tests/unit/`).
+- `npm run test:integration:up` / `:down` / `npm run test:integration` — bring up / tear down the Dockerized copyparty and run the integration suite against it (see "Testing against a copyparty server" below).
 
 ## Native Android dev environment (NixOS)
 
@@ -63,7 +63,24 @@ Once an AVD is booted (see above), these are the commands that drive it:
 - App package: `com.anonymous.copypartyclient` (derived from `app.json`'s `expo.android.package` via `com.anonymous.<slug>` when no package is set explicitly).
 - After `expo run:android` the dev-client deep-link is fired but the app may not stay foregrounded. Bring it up with `adb shell monkey -p com.anonymous.copypartyclient -c android.intent.category.LAUNCHER 1`.
 - Verify foreground: `adb shell "dumpsys activity activities | grep topResumedActivity"` — look for `com.anonymous.copypartyclient/.MainActivity`.
-- Screenshot: `adb exec-out screencap -p > /tmp/shot.png`, then Read the PNG to view it.
+- Screenshot: `adb exec-out screencap -p > tmp/shot.png`, then Read the PNG to view it.
+
+## Testing against a copyparty server
+
+`tests/docker-compose.yml` runs `copyparty/ac:latest` on `:3923` with a single account `test:testpw` and a single volume `/w` mounted `A,test` (full access). `--no-mutagen --no-thumb` are set to keep startup fast; the compose healthcheck polls `GET /?reset=/._` until ready. The `copyparty-data` named volume persists between runs — do `docker compose -f tests/docker-compose.yml down -v` (or `npm run test:integration:down`) between runs if a test needs a clean server.
+
+**Automated (Node/vitest) integration tests.** `tests/integration/**/*.test.ts` hit the container over HTTP. `tests/integration/helpers.ts` is the single source of truth for connection details — it exports `COPYPARTY_URL` (default `http://127.0.0.1:3923`), `COPYPARTY_USER` (`test`), `COPYPARTY_PW` (`testpw`), plus `copypartyReachable()`, `withTempDir()`, `writeRandomFile()`, and `uniqueRemoteFolder()`. All three env vars are overridable — point the suite at a non-Docker server by exporting them before `npm run test:integration`. `vitest.integration.config.ts` has a 120s test/hook timeout because cold-start + dedup checks are slow.
+
+**Manual testing from the Android emulator.** The emulator is a VM; its loopback is not your host's. Reach the dockerized copyparty (or any server on the host) at **`http://10.0.2.2:3923`** — `10.0.2.2` is the standard Android-emulator alias for the host's `127.0.0.1`. In-app: add a Server pointing at that URL with user `test` / password `testpw`. Credentials are persisted via `expo-secure-store` under the key `server_<id>_pw` (see `src/storage/secrets.ts`); the base URL and non-secret fields live in the `servers` SQLite table (`src/db/servers.ts`).
+
+**Verifying uploads from the host.** The server is reachable from the host at `127.0.0.1:3923` regardless of who uploaded. Quick sanity check:
+
+```
+curl -u test:testpw "http://127.0.0.1:3923/?ls=/"
+curl -u test:testpw -O "http://127.0.0.1:3923/<remote-path>/<file>"
+```
+
+**`smoke-test-prompt.txt`** at the repo root is a pending design prompt for an end-to-end Android smoke test (Phase 3 manual-verification gap). It is a planning artifact, not a finished spec — confirm decisions with the user before implementing.
 
 ## Architecture
 
