@@ -50,5 +50,8 @@ app-example
 # Claude Code — keep settings.json shared, ignore per-machine local settings
 .claude/settings.local.json
 
+# Scratch dir for screenshots, payloads, ad-hoc test artifacts
+tmp/
+
 # IDE
 .idea/

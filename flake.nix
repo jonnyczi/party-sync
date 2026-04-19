@@ -36,6 +36,9 @@
           pkgs.jdk17
           pkgs.gradle
           androidSdk
+          # For downscaling emulator screencaps before feeding them to Claude —
+          # vision tokens are driven by pixel count, not file size.
+          pkgs.imagemagick
         ];
 
         shellHook = ''
