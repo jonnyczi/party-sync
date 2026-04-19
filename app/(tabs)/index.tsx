@@ -1,98 +1,166 @@
-import { Image } from 'expo-image';
-import { Platform, StyleSheet } from 'react-native';
+import { useFocusEffect, useRouter } from 'expo-router';
+import { useSQLiteContext } from 'expo-sqlite';
+import { useCallback, useState } from 'react';
+import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
-import { HelloWave } from '@/components/hello-wave';
-import ParallaxScrollView from '@/components/parallax-scroll-view';
+import { SyncBanner } from '@/components/sync-banner';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Link } from 'expo-router';
+import { listJobs } from '@/src/db/jobs';
+import { getLatestRunForJob } from '@/src/db/runs';
+import type { JobRow, RunRow } from '@/src/db/types';
+
+interface DashboardItem {
+  job: JobRow;
+  lastRun: RunRow | null;
+}
 
 export default function HomeScreen() {
-  return (
-    <ParallaxScrollView
-      headerBackgroundColor={{ light: '#A1CEDC', dark: '#1D3D47' }}
-      headerImage={
-        <Image
-          source={require('@/assets/images/partial-react-logo.png')}
-          style={styles.reactLogo}
-        />
-      }>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText type="title">Welcome!</ThemedText>
-        <HelloWave />
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 1: Try it</ThemedText>
-        <ThemedText>
-          Edit <ThemedText type="defaultSemiBold">app/(tabs)/index.tsx</ThemedText> to see changes.
-          Press{' '}
-          <ThemedText type="defaultSemiBold">
-            {Platform.select({
-              ios: 'cmd + d',
-              android: 'cmd + m',
-              web: 'F12',
-            })}
-          </ThemedText>{' '}
-          to open developer tools.
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <Link href="/modal">
-          <Link.Trigger>
-            <ThemedText type="subtitle">Step 2: Explore</ThemedText>
-          </Link.Trigger>
-          <Link.Preview />
-          <Link.Menu>
-            <Link.MenuAction title="Action" icon="cube" onPress={() => alert('Action pressed')} />
-            <Link.MenuAction
-              title="Share"
-              icon="square.and.arrow.up"
-              onPress={() => alert('Share pressed')}
-            />
-            <Link.Menu title="More" icon="ellipsis">
-              <Link.MenuAction
-                title="Delete"
-                icon="trash"
-                destructive
-                onPress={() => alert('Delete pressed')}
-              />
-            </Link.Menu>
-          </Link.Menu>
-        </Link>
+  const db = useSQLiteContext();
+  const router = useRouter();
+  const [items, setItems] = useState<DashboardItem[]>([]);
 
-        <ThemedText>
-          {`Tap the Explore tab to learn more about what's included in this starter app.`}
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 3: Get a fresh start</ThemedText>
-        <ThemedText>
-          {`When you're ready, run `}
-          <ThemedText type="defaultSemiBold">npm run reset-project</ThemedText> to get a fresh{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> directory. This will move the current{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> to{' '}
-          <ThemedText type="defaultSemiBold">app-example</ThemedText>.
-        </ThemedText>
-      </ThemedView>
-    </ParallaxScrollView>
+  const refresh = useCallback(async () => {
+    const jobs = await listJobs(db);
+    const hydrated = await Promise.all(
+      jobs.map(async (j) => ({ job: j, lastRun: await getLatestRunForJob(db, j.id) })),
+    );
+    setItems(hydrated);
+  }, [db]);
+
+  useFocusEffect(
+    useCallback(() => {
+      refresh();
+    }, [refresh]),
+  );
+
+  const totalUploaded = items.reduce((s, i) => s + (i.lastRun?.files_uploaded ?? 0), 0);
+  const totalFailed = items.reduce((s, i) => s + (i.lastRun?.files_failed ?? 0), 0);
+
+  return (
+    <ThemedView style={styles.container}>
+      <View style={styles.header}>
+        <ThemedText type="title">Dashboard</ThemedText>
+      </View>
+
+      <SyncBanner />
+
+      <ScrollView contentContainerStyle={styles.scroll}>
+        {items.length === 0 ? (
+          <View style={styles.empty}>
+            <ThemedText type="subtitle">Nothing to sync yet</ThemedText>
+            <ThemedText style={styles.emptyHint}>
+              Add a server in Settings, then configure a sync job in the Jobs tab.
+            </ThemedText>
+          </View>
+        ) : (
+          <>
+            <View style={styles.summary}>
+              <SummaryCell label="Jobs" value={String(items.length)} />
+              <SummaryCell label="Uploaded (last run)" value={String(totalUploaded)} />
+              <SummaryCell
+                label="Failed (last run)"
+                value={String(totalFailed)}
+                bad={totalFailed > 0}
+              />
+            </View>
+
+            <ThemedText type="subtitle" style={styles.sectionHeader}>
+              Jobs
+            </ThemedText>
+            {items.map((item) => (
+              <Pressable
+                key={item.job.id}
+                onPress={() => router.push(`/job/${item.job.id}`)}
+                style={({ pressed }) => [styles.row, { opacity: pressed ? 0.6 : 1 }]}>
+                <View style={{ flex: 1, gap: 3 }}>
+                  <ThemedText type="defaultSemiBold">{item.job.name}</ThemedText>
+                  <ThemedText style={styles.rowSub} numberOfLines={1}>
+                    {item.job.remote_path}
+                  </ThemedText>
+                  <RunLine run={item.lastRun} />
+                </View>
+              </Pressable>
+            ))}
+          </>
+        )}
+      </ScrollView>
+    </ThemedView>
+  );
+}
+
+function SummaryCell({
+  label,
+  value,
+  bad,
+}: {
+  label: string;
+  value: string;
+  bad?: boolean;
+}) {
+  return (
+    <View style={styles.summaryCell}>
+      <ThemedText type="title" style={bad ? { color: '#c33' } : undefined}>
+        {value}
+      </ThemedText>
+      <ThemedText style={styles.summaryLabel}>{label}</ThemedText>
+    </View>
+  );
+}
+
+function RunLine({ run }: { run: RunRow | null }) {
+  if (!run) {
+    return <ThemedText style={styles.runMuted}>Never synced</ThemedText>;
+  }
+  const color =
+    run.status === 'ok'
+      ? '#2a9d3f'
+      : run.status === 'partial'
+        ? '#d08900'
+        : run.status === 'failed'
+          ? '#c33'
+          : '#888';
+  return (
+    <View style={styles.runLine}>
+      <View style={[styles.statusDot, { backgroundColor: color }]} />
+      <ThemedText style={styles.runText} numberOfLines={1}>
+        {new Date(run.started_at).toLocaleString()} · {run.status}
+      </ThemedText>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  titleContainer: {
+  container: { flex: 1, paddingTop: 56 },
+  header: { paddingHorizontal: 16, paddingBottom: 12 },
+  scroll: { paddingBottom: 24 },
+  summary: {
     flexDirection: 'row',
-    alignItems: 'center',
     gap: 8,
+    paddingHorizontal: 16,
+    paddingBottom: 12,
   },
-  stepContainer: {
-    gap: 8,
-    marginBottom: 8,
+  summaryCell: {
+    flex: 1,
+    padding: 12,
+    borderRadius: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#8884',
+    alignItems: 'flex-start',
   },
-  reactLogo: {
-    height: 178,
-    width: 290,
-    bottom: 0,
-    left: 0,
-    position: 'absolute',
+  summaryLabel: { fontSize: 12, opacity: 0.7, marginTop: 2 },
+  sectionHeader: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 4 },
+  row: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#8882',
   },
+  rowSub: { opacity: 0.7, fontSize: 13 },
+  runLine: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  runText: { opacity: 0.7, fontSize: 12, flexShrink: 1 },
+  runMuted: { opacity: 0.5, fontSize: 12, fontStyle: 'italic' },
+  statusDot: { width: 8, height: 8, borderRadius: 4 },
+  empty: { paddingHorizontal: 24, paddingTop: 48, gap: 8 },
+  emptyHint: { opacity: 0.7 },
 });

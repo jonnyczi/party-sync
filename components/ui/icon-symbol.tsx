@@ -21,6 +21,13 @@ const MAPPING = {
   'gearshape.fill': 'settings',
   'plus': 'add',
   'trash': 'delete',
+  'folder.fill': 'folder',
+  'arrow.triangle.2.circlepath': 'sync',
+  'checkmark.circle.fill': 'check-circle',
+  'exclamationmark.triangle.fill': 'warning',
+  'xmark.circle.fill': 'cancel',
+  'clock': 'schedule',
+  'arrow.up.circle.fill': 'arrow-upward',
 } as IconMapping;
 
 /**
