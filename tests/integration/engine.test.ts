@@ -4,11 +4,17 @@ import { join } from 'node:path';
 import { beforeAll, describe, expect, it } from 'vitest';
 
 import { CopypartyClient } from '../../src/copyparty/client';
+import type { FileSource } from '../../src/copyparty/hash';
 import { nodeFileSource } from '../../src/copyparty/hash.node';
 import { createJob } from '../../src/db/jobs';
 import { runMigrations } from '../../src/db/schema';
 import { createServer } from '../../src/db/servers';
 import { runJob } from '../../src/sync/engine';
+import {
+  createMediaWalker,
+  MEDIA_SOURCE_ALL,
+  type MediaAsset,
+} from '../../src/sync/walker/media';
 import type { SourceWalker, WalkerEntry } from '../../src/sync/walker/types';
 
 import { createNodeSqliteDb } from './db-adapter';
@@ -201,4 +207,155 @@ describe('engine end-to-end against copyparty', () => {
       db.close();
     });
   });
+
+  /**
+   * Source-kind routing, phase 4. Drives the engine via `createMediaWalker`
+   * (the unit of work the trigger dispatches to when `source_kind === 'media'`)
+   * with a fake MediaLibrary + a FileSource that maps content:// URIs back
+   * to real files on disk. This verifies two things the SAF test doesn't:
+   *
+   *   1. Media WalkerEntries (content URI as localPath AND uri; asset
+   *      filename as relativePath) flow through the engine correctly —
+   *      file_state.local_path ends up storing the content URI.
+   *   2. Files land on the server under their filename at the job's
+   *      `remote_path` root (not under per-asset subdirs), which is the
+   *      behavior the plan specifies for camera-roll jobs.
+   *
+   * We can't drive the real MediaLibrary or the Android native module from
+   * Node, and the trigger's dispatch itself is a tiny if/else; the routing
+   * worth exercising is "does a media-shaped walker produce data the engine
+   * handles correctly" — that's what this test covers.
+   */
+  it('runs a media-source job end-to-end (media walker + content URI keys)', async () => {
+    requireServer();
+    await withTempDir(async (dir) => {
+      interface Fixture {
+        asset: MediaAsset;
+        diskPath: string;
+        contentUri: string;
+        size: number;
+      }
+      const fixtures: Fixture[] = [
+        makeFixture('IMG_0001.jpg', '101', 'photo', 64 * 1024, 301),
+        makeFixture('IMG_0002.jpg', '102', 'photo', 3 * MIB, 302),
+        makeFixture('VID_0001.mp4', '201', 'video', 100 * 1024, 303),
+      ];
+      for (const f of fixtures) {
+        await writeRandomFile(join(dir, f.diskPath), f.size, Number(f.asset.id));
+      }
+
+      const byUri = new Map(fixtures.map((f) => [f.contentUri, join(dir, f.diskPath)]));
+      const fakeLibrary = {
+        getAssetsAsync: async (_opts: unknown) => ({
+          assets: fixtures.map((f) => f.asset),
+          endCursor: 'end',
+          hasNextPage: false,
+        }),
+      };
+      const sizer = {
+        size: async (uri: string) => {
+          const p = byUri.get(uri);
+          if (!p) throw new Error(`unknown uri: ${uri}`);
+          return (await stat(p)).size;
+        },
+      };
+      const walker = createMediaWalker(fakeLibrary, sizer);
+
+      // FileSource that rewrites content:// URIs to real disk paths before
+      // handing off to nodeFileSource. In production the native module
+      // opens content:// via ContentResolver; here we emulate the shape.
+      const mappedFileSource: FileSource = {
+        hashFileChunks: (uri, cs) =>
+          nodeFileSource.hashFileChunks(resolveUri(byUri, uri), cs),
+        readRange: (uri, car, cdr) =>
+          nodeFileSource.readRange(resolveUri(byUri, uri), car, cdr),
+        size: (uri) => nodeFileSource.size(resolveUri(byUri, uri)),
+      };
+
+      const remoteFolder = uniqueRemoteFolder('engine-media');
+
+      const db = createNodeSqliteDb();
+      await runMigrations(db);
+      const serverId = await createServer(db, {
+        name: 's',
+        base_url: COPYPARTY_URL,
+      });
+      const jobId = await createJob(db, {
+        server_id: serverId,
+        name: 'media',
+        source_kind: 'media',
+        source_uri: MEDIA_SOURCE_ALL,
+        remote_path: remoteFolder,
+      });
+
+      const client = new CopypartyClient({
+        baseUrl: COPYPARTY_URL,
+        password: COPYPARTY_PW,
+      });
+      const ctx = {
+        db,
+        walker,
+        client,
+        fileSource: mappedFileSource,
+        sleep: (_ms: number) => Promise.resolve<void>(undefined),
+      };
+
+      const first = await runJob(ctx, jobId);
+      expect(first.status).toBe('ok');
+      expect(first.files_scanned).toBe(3);
+      expect(first.files_uploaded).toBe(3);
+      expect(first.files_failed).toBe(0);
+
+      // file_state keys are the MediaStore content URIs — the phase-4
+      // decision for media-source jobs.
+      const rows = await db.getAllAsync<{ local_path: string }>(
+        'SELECT local_path FROM file_state WHERE job_id = ? ORDER BY local_path',
+        [jobId],
+      );
+      expect(rows.map((r) => r.local_path)).toEqual([
+        'content://media/external/images/media/101',
+        'content://media/external/images/media/102',
+        'content://media/external/video/media/201',
+      ]);
+
+      // Second run is a full dedup — validates (size, mtime) short-circuit
+      // works against content-URI keys just like it does for SAF.
+      const second = await runJob(ctx, jobId);
+      expect(second.files_skipped).toBe(3);
+      expect(second.files_uploaded).toBe(0);
+
+      db.close();
+    });
+  });
 });
+
+function mediaStoreContentUri(id: string, kind: 'photo' | 'video'): string {
+  const bucket = kind === 'photo' ? 'images' : 'video';
+  return `content://media/external/${bucket}/media/${id}`;
+}
+
+function makeFixture(
+  filename: string,
+  id: string,
+  kind: 'photo' | 'video',
+  size: number,
+  mtimeMs: number,
+): {
+  asset: MediaAsset;
+  diskPath: string;
+  contentUri: string;
+  size: number;
+} {
+  return {
+    asset: { id, filename, mediaType: kind, modificationTime: mtimeMs },
+    diskPath: filename,
+    contentUri: mediaStoreContentUri(id, kind),
+    size,
+  };
+}
+
+function resolveUri(byUri: Map<string, string>, uri: string): string {
+  const p = byUri.get(uri);
+  if (!p) throw new Error(`no mapping for uri ${uri}`);
+  return p;
+}

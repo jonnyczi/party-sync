@@ -28,10 +28,11 @@ import {
   listRunsForJob,
 } from '@/src/db/runs';
 import { listServers } from '@/src/db/servers';
-import type { RunErrorRow, RunRow, ServerRow } from '@/src/db/types';
+import type { RunErrorRow, RunRow, ServerRow, SourceKind } from '@/src/db/types';
 import { getServerPassword } from '@/src/storage/secrets';
 import type { ActiveRunSnapshot } from '@/src/sync/progress';
 import { runJobManual } from '@/src/sync/triggers/manual';
+import { MEDIA_SOURCE_ALL } from '@/src/sync/walker/media';
 
 function normalizeRemotePath(raw: string): string {
   const trimmed = raw.trim();
@@ -52,6 +53,11 @@ export default function JobEditScreen() {
   const [servers, setServers] = useState<ServerRow[]>([]);
   const [serverId, setServerId] = useState<number | null>(null);
   const [name, setName] = useState('');
+  // `sourceKind` is locked once a job is saved — changing it would
+  // invalidate every row in `file_state` for this job (SAF relative paths
+  // and MediaStore content URIs don't mix). On the edit screen the
+  // segmented control renders as read-only.
+  const [sourceKind, setSourceKind] = useState<SourceKind>('saf');
   const [sourceUri, setSourceUri] = useState('');
   const [remotePath, setRemotePath] = useState('');
   const [loaded, setLoaded] = useState(isNew);
@@ -83,6 +89,7 @@ export default function JobEditScreen() {
       }
       setServerId(row.server_id);
       setName(row.name);
+      setSourceKind(row.source_kind);
       setSourceUri(row.source_uri);
       setRemotePath(row.remote_path);
       setLoaded(true);
@@ -118,6 +125,15 @@ export default function JobEditScreen() {
     }
   };
 
+  // Switching source kind on the create screen wipes the source handle —
+  // SAF URIs and the media sentinel are not interchangeable. On the edit
+  // screen the control is disabled entirely.
+  const onChangeSourceKind = (next: SourceKind) => {
+    if (!isNew || next === sourceKind) return;
+    setSourceKind(next);
+    setSourceUri(next === 'media' ? MEDIA_SOURCE_ALL : '');
+  };
+
   const canSave =
     serverId !== null &&
     name.trim().length > 0 &&
@@ -130,7 +146,7 @@ export default function JobEditScreen() {
     const input = {
       server_id: serverId,
       name: name.trim(),
-      source_kind: 'saf' as const,
+      source_kind: sourceKind,
       source_uri: sourceUri,
       remote_path: normalizeRemotePath(remotePath),
     };
@@ -198,17 +214,22 @@ export default function JobEditScreen() {
         password: pw,
         certSha256: server.cert_sha256,
         remotePath: remote,
-        sourceUri: sourceUri || undefined,
+        sourceKind,
+        sourceUri: sourceKind === 'saf' ? sourceUri || undefined : undefined,
       });
       if (!result.localOk) {
         Alert.alert(
-          'Local folder unavailable',
-          'Remote OK, but the local folder permission is gone. Re-pick it.',
+          sourceKind === 'media' ? 'Camera-roll permission missing' : 'Local folder unavailable',
+          sourceKind === 'media'
+            ? 'Remote OK, but camera-roll access is not granted. Grant it and retry.'
+            : 'Remote OK, but the local folder permission is gone. Re-pick it.',
         );
       } else {
         Alert.alert(
           'Connection OK',
-          `Remote path ${remote} is writable and the local folder is accessible.`,
+          sourceKind === 'media'
+            ? `Remote path ${remote} is writable and camera-roll access is granted.`
+            : `Remote path ${remote} is writable and the local folder is accessible.`,
         );
       }
     } catch (e) {
@@ -319,24 +340,85 @@ export default function JobEditScreen() {
             )}
           </Field>
 
-          <Field label="Local folder">
-            <Pressable
-              onPress={pickFolder}
-              style={({ pressed }) => [
-                styles.pickBtn,
-                { borderColor: Colors[scheme].icon, opacity: pressed ? 0.7 : 1 },
-              ]}>
-              <IconSymbol name="folder.fill" color={Colors[scheme].tint} size={20} />
-              <ThemedText style={{ color: Colors[scheme].tint }}>
-                {sourceUri ? 'Change folder' : 'Pick folder…'}
-              </ThemedText>
-            </Pressable>
-            {sourceUri ? (
-              <ThemedText style={styles.uri} numberOfLines={2}>
-                {decodeURIComponent(sourceUri)}
+          <Field label="Source">
+            <View style={styles.segmented}>
+              {(['saf', 'media'] as const).map((kind) => {
+                const selected = sourceKind === kind;
+                const disabled = !isNew && !selected;
+                return (
+                  <Pressable
+                    key={kind}
+                    onPress={() => onChangeSourceKind(kind)}
+                    disabled={disabled}
+                    style={({ pressed }) => [
+                      styles.segmentedBtn,
+                      {
+                        backgroundColor: selected ? Colors[scheme].tint : 'transparent',
+                        borderColor: Colors[scheme].icon,
+                        opacity: disabled ? 0.4 : pressed ? 0.7 : 1,
+                      },
+                    ]}>
+                    <IconSymbol
+                      name={kind === 'saf' ? 'folder.fill' : 'photo.on.rectangle'}
+                      color={selected ? '#fff' : Colors[scheme].tint}
+                      size={16}
+                    />
+                    <ThemedText
+                      style={{
+                        color: selected ? '#fff' : Colors[scheme].tint,
+                        fontWeight: '600',
+                      }}>
+                      {kind === 'saf' ? 'Folder' : 'Camera roll'}
+                    </ThemedText>
+                  </Pressable>
+                );
+              })}
+            </View>
+            {!isNew ? (
+              <ThemedText style={styles.hint}>
+                Source type is locked after creating a job.
               </ThemedText>
             ) : null}
           </Field>
+
+          {sourceKind === 'saf' ? (
+            <Field label="Local folder">
+              <Pressable
+                onPress={pickFolder}
+                style={({ pressed }) => [
+                  styles.pickBtn,
+                  { borderColor: Colors[scheme].icon, opacity: pressed ? 0.7 : 1 },
+                ]}>
+                <IconSymbol name="folder.fill" color={Colors[scheme].tint} size={20} />
+                <ThemedText style={{ color: Colors[scheme].tint }}>
+                  {sourceUri ? 'Change folder' : 'Pick folder…'}
+                </ThemedText>
+              </Pressable>
+              {sourceUri ? (
+                <ThemedText style={styles.uri} numberOfLines={2}>
+                  {decodeURIComponent(sourceUri)}
+                </ThemedText>
+              ) : null}
+            </Field>
+          ) : (
+            <Field label="Camera roll scope">
+              <View
+                style={[
+                  styles.pickBtn,
+                  { borderColor: Colors[scheme].icon, gap: 8 },
+                ]}>
+                <IconSymbol
+                  name="photo.on.rectangle"
+                  color={Colors[scheme].tint}
+                  size={20}
+                />
+                <ThemedText>All photos and videos</ThemedText>
+              </View>
+              <ThemedText style={styles.hint}>
+                Album filtering comes in a later release.
+              </ThemedText>
+            </Field>
+          )}
 
           <Field label="Remote path">
             <TextInput
@@ -587,6 +669,20 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     paddingHorizontal: 12,
     paddingVertical: 12,
+  },
+  segmented: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  segmentedBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 8,
+    paddingVertical: 10,
   },
   uri: { opacity: 0.7, fontSize: 11, marginTop: 4 },
   hint: { opacity: 0.7, fontSize: 13 },

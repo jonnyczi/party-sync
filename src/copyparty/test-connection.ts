@@ -40,7 +40,10 @@ export interface TestServerOptions {
 
 export interface TestJobOptions extends TestServerOptions {
   remotePath: string;
+  /** SAF tree URI — only meaningful when sourceKind === 'saf'. */
   sourceUri?: string;
+  /** When 'media', local check asks for MediaLibrary permission instead of probing SAF. */
+  sourceKind?: 'saf' | 'media';
 }
 
 export async function testServerConnection(opts: TestServerOptions): Promise<void> {
@@ -91,7 +94,9 @@ export async function testJobConnection(
     );
   }
   let localOk = true;
-  if (opts.sourceUri) {
+  if (opts.sourceKind === 'media') {
+    localOk = await probeMediaLibrary();
+  } else if (opts.sourceUri) {
     localOk = await probeSaf(opts.sourceUri);
   }
   return { remoteOk: true, localOk };
@@ -134,6 +139,17 @@ async function probeSaf(sourceUri: string): Promise<boolean> {
     const mod = await import('expo-file-system/legacy');
     await mod.StorageAccessFramework.readDirectoryAsync(sourceUri);
     return true;
+  } catch {
+    return false;
+  }
+}
+
+async function probeMediaLibrary(): Promise<boolean> {
+  try {
+    // Lazy-require for the same reason as probeSaf.
+    const mod = await import('expo-media-library');
+    const perm = await mod.getPermissionsAsync(false, ['photo', 'video']);
+    return perm.status === 'granted';
   } catch {
     return false;
   }

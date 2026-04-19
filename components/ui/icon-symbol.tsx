@@ -22,6 +22,7 @@ const MAPPING = {
   'plus': 'add',
   'trash': 'delete',
   'folder.fill': 'folder',
+  'photo.on.rectangle': 'photo-library',
   'arrow.triangle.2.circlepath': 'sync',
   'checkmark.circle.fill': 'check-circle',
   'exclamationmark.triangle.fill': 'warning',

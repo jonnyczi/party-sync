@@ -113,6 +113,11 @@ export default function JobsScreen() {
               onPress={() => router.push(`/job/${item.job.id}`)}
               onLongPress={() => confirmDelete(item)}
               style={({ pressed }) => [styles.row, { opacity: pressed ? 0.6 : 1 }]}>
+              <IconSymbol
+                name={item.job.source_kind === 'media' ? 'photo.on.rectangle' : 'folder.fill'}
+                color={Colors[scheme].icon}
+                size={22}
+              />
               <View style={styles.rowMain}>
                 <ThemedText type="defaultSemiBold">{item.job.name}</ThemedText>
                 <ThemedText style={styles.rowSub} numberOfLines={1}>

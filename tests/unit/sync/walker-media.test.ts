@@ -1,0 +1,181 @@
+import { describe, expect, it } from 'vitest';
+
+import { createMediaWalker, MEDIA_SOURCE_ALL } from '@/src/sync/walker/media';
+import type { WalkerEntry } from '@/src/sync/walker/types';
+
+type Asset = {
+  id: string;
+  filename: string;
+  mediaType: 'photo' | 'video' | 'audio' | 'unknown';
+  modificationTime: number;
+};
+
+interface FakePage {
+  assets: Asset[];
+  endCursor: string;
+  hasNextPage: boolean;
+  totalCount: number;
+}
+
+function fakeLibrary(pages: FakePage[]) {
+  // One call per page. We assert `after` threading so the walker can't
+  // re-request page 0 by accident and stall.
+  const calls: { first: number; after?: string }[] = [];
+  return {
+    calls,
+    getAssetsAsync: async (opts: { first: number; after?: string }) => {
+      calls.push({ first: opts.first, after: opts.after });
+      const idx = opts.after
+        ? pages.findIndex((p, i) => i > 0 && pages[i - 1].endCursor === opts.after)
+        : 0;
+      if (idx < 0) throw new Error(`fake library: unknown cursor ${opts.after}`);
+      return pages[idx];
+    },
+  };
+}
+
+function fakeSizer(sizes: Record<string, number | Error>) {
+  return {
+    size: async (uri: string) => {
+      const v = sizes[uri];
+      if (v === undefined) throw new Error(`fake sizer: no size for ${uri}`);
+      if (v instanceof Error) throw v;
+      return v;
+    },
+  };
+}
+
+async function collect<T>(iter: AsyncIterable<T>): Promise<T[]> {
+  const out: T[] = [];
+  for await (const v of iter) out.push(v);
+  return out;
+}
+
+describe('mediaWalker', () => {
+  it('yields one WalkerEntry per photo/video with MediaStore content URIs', async () => {
+    const library = fakeLibrary([
+      {
+        assets: [
+          { id: '1', filename: 'IMG_0001.jpg', mediaType: 'photo', modificationTime: 1000 },
+          { id: '2', filename: 'VID_0001.mp4', mediaType: 'video', modificationTime: 2000 },
+        ],
+        endCursor: 'c1',
+        hasNextPage: false,
+        totalCount: 2,
+      },
+    ]);
+    const sizer = fakeSizer({
+      'content://media/external/images/media/1': 123,
+      'content://media/external/video/media/2': 456_000_000,
+    });
+
+    const walker = createMediaWalker(library, sizer);
+    const out = await collect(walker.walk(MEDIA_SOURCE_ALL));
+
+    expect(out).toEqual<WalkerEntry[]>([
+      {
+        localPath: 'content://media/external/images/media/1',
+        uri: 'content://media/external/images/media/1',
+        relativePath: 'IMG_0001.jpg',
+        size: 123,
+        mtimeMs: 1000,
+      },
+      {
+        localPath: 'content://media/external/video/media/2',
+        uri: 'content://media/external/video/media/2',
+        relativePath: 'VID_0001.mp4',
+        size: 456_000_000,
+        mtimeMs: 2000,
+      },
+    ]);
+  });
+
+  it('paginates via endCursor until hasNextPage is false', async () => {
+    const library = fakeLibrary([
+      {
+        assets: [
+          { id: '1', filename: 'a.jpg', mediaType: 'photo', modificationTime: 1 },
+        ],
+        endCursor: 'cA',
+        hasNextPage: true,
+        totalCount: 2,
+      },
+      {
+        assets: [
+          { id: '2', filename: 'b.jpg', mediaType: 'photo', modificationTime: 2 },
+        ],
+        endCursor: 'cB',
+        hasNextPage: false,
+        totalCount: 2,
+      },
+    ]);
+    const sizer = fakeSizer({
+      'content://media/external/images/media/1': 10,
+      'content://media/external/images/media/2': 20,
+    });
+
+    const walker = createMediaWalker(library, sizer);
+    const out = await collect(walker.walk(MEDIA_SOURCE_ALL));
+
+    expect(out.map((e) => e.localPath)).toEqual([
+      'content://media/external/images/media/1',
+      'content://media/external/images/media/2',
+    ]);
+    expect(library.calls).toHaveLength(2);
+    expect(library.calls[0].after).toBeUndefined();
+    expect(library.calls[1].after).toBe('cA');
+  });
+
+  it('skips assets whose size() throws (disappeared between enumeration and stat)', async () => {
+    const library = fakeLibrary([
+      {
+        assets: [
+          { id: '1', filename: 'ok.jpg', mediaType: 'photo', modificationTime: 1 },
+          { id: '2', filename: 'gone.jpg', mediaType: 'photo', modificationTime: 2 },
+          { id: '3', filename: 'also-ok.jpg', mediaType: 'photo', modificationTime: 3 },
+        ],
+        endCursor: 'cA',
+        hasNextPage: false,
+        totalCount: 3,
+      },
+    ]);
+    const sizer = fakeSizer({
+      'content://media/external/images/media/1': 10,
+      'content://media/external/images/media/2': new Error('no such row'),
+      'content://media/external/images/media/3': 30,
+    });
+
+    const walker = createMediaWalker(library, sizer);
+    const out = await collect(walker.walk(MEDIA_SOURCE_ALL));
+
+    expect(out.map((e) => e.relativePath)).toEqual(['ok.jpg', 'also-ok.jpg']);
+  });
+
+  it('skips unknown mediaType rows (audio, unknown)', async () => {
+    const library = fakeLibrary([
+      {
+        assets: [
+          { id: '1', filename: 'song.mp3', mediaType: 'audio', modificationTime: 1 },
+          { id: '2', filename: 'file.bin', mediaType: 'unknown', modificationTime: 2 },
+          { id: '3', filename: 'img.jpg', mediaType: 'photo', modificationTime: 3 },
+        ],
+        endCursor: 'cA',
+        hasNextPage: false,
+        totalCount: 3,
+      },
+    ]);
+    const sizer = fakeSizer({
+      'content://media/external/images/media/3': 10,
+    });
+
+    const walker = createMediaWalker(library, sizer);
+    const out = await collect(walker.walk(MEDIA_SOURCE_ALL));
+
+    expect(out.map((e) => e.relativePath)).toEqual(['img.jpg']);
+  });
+
+  it('rejects source_uri values other than the "all" sentinel', async () => {
+    const walker = createMediaWalker(fakeLibrary([]), fakeSizer({}));
+    await expect(collect(walker.walk('album:42'))).rejects.toThrow(/only supports/);
+  });
+});
