@@ -25,7 +25,12 @@ npx expo run:android        # or `npm run android` from inside the shell
 
 **What the dev shell provides**: JDK 17, Gradle 8.14.x, Android SDK platforms 35 + 36, build-tools 35.0.0 + 36.0.0, NDK 27.1.12297006, CMake 3.22.1. Platform 35 is required because `modules/copyparty-sha512`'s `expo-module-gradle-plugin` defaults `compileSdkVersion` to 35 when no version catalog overrides it; everything else uses 36.
 
-**What stays on the host**: the Android emulator and AVDs. Run `emulator @<AVD>` from any shell and `adb devices` to confirm. The flake intentionally omits `includeEmulator`/`includeSystemImages` to keep its closure small.
+**What stays on the host**: the Android emulator and AVDs. The flake intentionally omits `includeEmulator`/`includeSystemImages` to keep its closure small.
+
+Launching an AVD on NixOS: the SDK's `emulator` binary is an unpatched FHS ELF and fails from a plain shell with `libX11.so.6: cannot open shared object file`. Two working options:
+
+- **Preferred:** launch the AVD from Android Studio's Device Manager; confirm with `adb devices`.
+- Or add the runtime libs to `programs.nix-ld.libraries` in `~/nixos/hosts/<host>/configuration.nix` (`nix-ld` is already enabled on this machine) — `xorg.libX11`, `xorg.libXcomposite`, `xorg.libXcursor`, `xorg.libXdamage`, `xorg.libXext`, `xorg.libXfixes`, `xorg.libXi`, `xorg.libXrandr`, `xorg.libXrender`, `xorg.libXtst`, `xorg.libxcb`, `xorg.libICE`, `xorg.libSM`, `libGL`, `libdrm`, `mesa`, `libxkbcommon`, `fontconfig`, `freetype`, `glib`, `gtk3`, `dbus`, `nss`, `nspr`, `alsa-lib`, `libpulseaudio`, `systemd`, `zlib`, `stdenv.cc.cc.lib`. After `nixos-rebuild switch`, `emulator @<AVD>` works from any shell.
 
 **Host prerequisite (this machine only)**: a symlink so the macOS-style PATH entries resolve to the Linux SDK location:
 
@@ -38,6 +43,27 @@ Other contributors with a standard Linux SDK path don't need this.
 **Gradle wrapper hardening**: the `shellHook` in `flake.nix` automatically (a) bumps the wrapper's `networkTimeout` from the prebuild default (10s) to 600s and (b) primes `~/.gradle/wrapper/dists/...` with the Gradle distribution zip + `.ok` marker on first shell entry. If priming fails (network), the shell prints the exact `curl` command to retry.
 
 **`flake.lock` is committed** — pins `nixpkgs` (currently `nixos-25.11`) so all clones get identical store paths.
+
+## Running commands that need the Android toolchain
+
+A plain shell inside this repo reports `IN_NIX_SHELL=impure` but has **no** JDK, Gradle, or Android SDK on PATH — it is not the project devShell. Any command that touches gradle or native Android (e.g. `npx expo run:android`, `./android/gradlew …`) must run inside the devShell. From a non-devShell context, wrap it:
+
+```
+nix develop --command bash -c 'npx expo run:android'
+```
+
+If `JAVA_HOME` is empty or `which java` has no result, you are not in the devShell — the build will fail with `ERROR: JAVA_HOME is not set`.
+
+## Controlling the running emulator from a session
+
+Once an AVD is booted (see above), these are the commands that drive it:
+
+- `adb devices` — expect `emulator-5554 device`.
+- `adb shell getprop sys.boot_completed` — `1` once the OS is ready; `adb shell getprop init.svc.bootanim` returns `stopped` when the boot animation finishes.
+- App package: `com.anonymous.copypartyclient` (derived from `app.json`'s `expo.android.package` via `com.anonymous.<slug>` when no package is set explicitly).
+- After `expo run:android` the dev-client deep-link is fired but the app may not stay foregrounded. Bring it up with `adb shell monkey -p com.anonymous.copypartyclient -c android.intent.category.LAUNCHER 1`.
+- Verify foreground: `adb shell "dumpsys activity activities | grep topResumedActivity"` — look for `com.anonymous.copypartyclient/.MainActivity`.
+- Screenshot: `adb exec-out screencap -p > /tmp/shot.png`, then Read the PNG to view it.
 
 ## Architecture
 
