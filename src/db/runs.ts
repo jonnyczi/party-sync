@@ -151,3 +151,63 @@ export async function listRunErrors(
     [runId],
   );
 }
+
+export async function countRunErrors(
+  db: SqliteDb,
+  runId: number,
+): Promise<number> {
+  const row = await db.getFirstAsync<{ n: number }>(
+    'SELECT COUNT(*) AS n FROM run_errors WHERE run_id = ?',
+    [runId],
+  );
+  return row?.n ?? 0;
+}
+
+export async function listRunsSince(
+  db: SqliteDb,
+  sinceMs: number,
+  limit = 500,
+): Promise<RunRow[]> {
+  return db.getAllAsync<RunRow>(
+    'SELECT * FROM runs WHERE started_at >= ? ORDER BY started_at DESC LIMIT ?',
+    [sinceMs, limit],
+  );
+}
+
+export interface RecentErrorRow {
+  error_id: number;
+  run_id: number;
+  job_id: number;
+  job_name: string;
+  local_path: string;
+  phase: ErrorPhase;
+  http_status: number | null;
+  message: string | null;
+  run_started_at: number;
+  run_status: RunStatus;
+}
+
+export async function listRecentErrors(
+  db: SqliteDb,
+  limit = 50,
+): Promise<RecentErrorRow[]> {
+  return db.getAllAsync<RecentErrorRow>(
+    `SELECT
+       e.id          AS error_id,
+       e.run_id      AS run_id,
+       r.job_id      AS job_id,
+       j.name        AS job_name,
+       e.local_path  AS local_path,
+       e.phase       AS phase,
+       e.http_status AS http_status,
+       e.message     AS message,
+       r.started_at  AS run_started_at,
+       r.status      AS run_status
+     FROM run_errors e
+     JOIN runs r ON r.id = e.run_id
+     JOIN jobs j ON j.id = r.job_id
+     ORDER BY r.started_at DESC, e.id DESC
+     LIMIT ?`,
+    [limit],
+  );
+}

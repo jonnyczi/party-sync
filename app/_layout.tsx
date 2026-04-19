@@ -41,6 +41,7 @@ export default function RootLayout() {
               name="job/[id]"
               options={{ title: 'Job', presentation: 'modal' }}
             />
+            <Stack.Screen name="run/[id]" options={{ title: 'Run' }} />
           </Stack>
         </SQLiteProvider>
       </Suspense>
