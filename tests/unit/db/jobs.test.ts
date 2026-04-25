@@ -39,6 +39,36 @@ describe('jobs DAO', () => {
     expect(row?.respect_data_saver).toBe(1);
     expect(row?.charging_only).toBe(0);
     expect(row?.rehash_interval_days).toBe(30);
+    expect(row?.periodic_enabled).toBe(0);
+    expect(row?.periodic_minutes).toBe(60);
+  });
+
+  it('round-trips periodic fields', async () => {
+    const id = await createJob(db, {
+      server_id: serverId,
+      name: 'sched',
+      source_kind: 'saf',
+      source_uri: 'content://tree',
+      remote_path: '/r',
+      periodic_enabled: true,
+      periodic_minutes: 30,
+    });
+    let row = await getJob(db, id);
+    expect(row?.periodic_enabled).toBe(1);
+    expect(row?.periodic_minutes).toBe(30);
+
+    await updateJob(db, id, {
+      server_id: serverId,
+      name: 'sched',
+      source_kind: 'saf',
+      source_uri: 'content://tree',
+      remote_path: '/r',
+      periodic_enabled: false,
+      periodic_minutes: 15,
+    });
+    row = await getJob(db, id);
+    expect(row?.periodic_enabled).toBe(0);
+    expect(row?.periodic_minutes).toBe(15);
   });
 
   it('honors boolean overrides in create/update', async () => {

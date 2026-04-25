@@ -78,6 +78,14 @@ const MIGRATIONS: Migration[] = [
       CREATE INDEX idx_run_errors_run ON run_errors(run_id);
     `,
   },
+  {
+    version: 2,
+    up: `
+      ALTER TABLE jobs ADD COLUMN periodic_enabled INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE jobs ADD COLUMN periodic_minutes INTEGER NOT NULL DEFAULT 60;
+      ALTER TABLE runs ADD COLUMN skip_reason TEXT;
+    `,
+  },
 ];
 
 /**

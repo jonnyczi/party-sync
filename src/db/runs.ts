@@ -5,6 +5,7 @@ import type {
   RunRow,
   RunStatus,
   RunTrigger,
+  SkipReason,
 } from './types';
 
 export interface StartRunInput {
@@ -86,6 +87,31 @@ export async function finishRun(
       runId,
     ],
   );
+}
+
+/**
+ * Write an instantaneous `runs` row for a periodic tick that was gated
+ * by a constraint. `started_at === finished_at`, counters all zero,
+ * `status='skipped'` with the reason preserved for diagnostics.
+ */
+export interface RecordSkippedRunInput {
+  job_id: number;
+  trigger: RunTrigger;
+  skip_reason: SkipReason;
+}
+
+export async function recordSkippedRun(
+  db: SqliteDb,
+  input: RecordSkippedRunInput,
+): Promise<number> {
+  const now = Date.now();
+  const res = await db.runAsync(
+    `INSERT INTO runs (
+       job_id, started_at, finished_at, trigger, status, skip_reason
+     ) VALUES (?, ?, ?, ?, 'skipped', ?)`,
+    [input.job_id, now, now, input.trigger, input.skip_reason],
+  );
+  return res.lastInsertRowId;
 }
 
 export async function getRun(

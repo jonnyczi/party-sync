@@ -459,7 +459,9 @@ function StatusDot({ status }: { status: RunRow['status'] }) {
         ? '#d08900'
         : status === 'failed'
           ? '#c33'
-          : '#888';
+          : status === 'skipped'
+            ? '#6a8caf'
+            : '#888';
   return <View style={[styles.statusDot, { backgroundColor: color }]} />;
 }
 
