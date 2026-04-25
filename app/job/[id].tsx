@@ -1,4 +1,5 @@
 import * as FileSystem from 'expo-file-system/legacy';
+import * as Notifications from 'expo-notifications';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useCallback, useEffect, useState } from 'react';
@@ -10,6 +11,7 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
+  Switch,
   TextInput,
   View,
 } from 'react-native';
@@ -31,6 +33,11 @@ import { listServers } from '@/src/db/servers';
 import type { RunErrorRow, RunRow, ServerRow, SourceKind } from '@/src/db/types';
 import { getServerPassword } from '@/src/storage/secrets';
 import type { ActiveRunSnapshot } from '@/src/sync/progress';
+import {
+  nextPeriodicRunAt,
+  PERIODIC_MIN_INTERVAL_MIN,
+} from '@/src/sync/scheduler';
+import { syncPeriodicRegistration } from '@/src/sync/scheduler-register';
 import { runJobManual } from '@/src/sync/triggers/manual';
 import { MEDIA_SOURCE_ALL } from '@/src/sync/walker/media';
 
@@ -60,6 +67,12 @@ export default function JobEditScreen() {
   const [sourceKind, setSourceKind] = useState<SourceKind>('saf');
   const [sourceUri, setSourceUri] = useState('');
   const [remotePath, setRemotePath] = useState('');
+  const [periodicEnabled, setPeriodicEnabled] = useState(false);
+  const [periodicMinutes, setPeriodicMinutes] = useState(60);
+  const [periodicMinutesText, setPeriodicMinutesText] = useState('60');
+  const [wifiOnly, setWifiOnly] = useState(true);
+  const [respectDataSaver, setRespectDataSaver] = useState(true);
+  const [chargingOnly, setChargingOnly] = useState(false);
   const [loaded, setLoaded] = useState(isNew);
   const [saving, setSaving] = useState(false);
   // `starting` covers the gap between tapping Sync-now and the engine
@@ -92,6 +105,12 @@ export default function JobEditScreen() {
       setSourceKind(row.source_kind);
       setSourceUri(row.source_uri);
       setRemotePath(row.remote_path);
+      setPeriodicEnabled(row.periodic_enabled === 1);
+      setPeriodicMinutes(row.periodic_minutes);
+      setPeriodicMinutesText(String(row.periodic_minutes));
+      setWifiOnly(row.wifi_only === 1);
+      setRespectDataSaver(row.respect_data_saver === 1);
+      setChargingOnly(row.charging_only === 1);
       setLoaded(true);
     });
   }, [db, isNew, jobId, router]);
@@ -143,12 +162,18 @@ export default function JobEditScreen() {
   const save = async () => {
     if (!canSave || saving || serverId === null) return;
     setSaving(true);
+    const clampedMinutes = Math.max(PERIODIC_MIN_INTERVAL_MIN, periodicMinutes);
     const input = {
       server_id: serverId,
       name: name.trim(),
       source_kind: sourceKind,
       source_uri: sourceUri,
       remote_path: normalizeRemotePath(remotePath),
+      periodic_enabled: periodicEnabled,
+      periodic_minutes: clampedMinutes,
+      wifi_only: wifiOnly,
+      respect_data_saver: respectDataSaver,
+      charging_only: chargingOnly,
     };
     try {
       if (isNew) {
@@ -156,12 +181,59 @@ export default function JobEditScreen() {
       } else {
         await updateJob(db, jobId!, input);
       }
+      // Update the WorkManager registration whenever a job's schedule
+      // state may have changed. Failures here are non-fatal — the app
+      // keeps working, just without the cadence update.
+      syncPeriodicRegistration(db).catch((e) => {
+        console.warn('[copyparty] syncPeriodicRegistration failed', e);
+      });
       router.back();
     } catch (e) {
       Alert.alert('Save failed', e instanceof Error ? e.message : 'Unknown error');
     } finally {
       setSaving(false);
     }
+  };
+
+  // Toggling periodic on requires POST_NOTIFICATIONS (Android 13+) so the
+  // foreground-service notification can actually be posted during ticks.
+  // Ask lazily here; if denied, revert the toggle and explain why.
+  const onTogglePeriodic = async (next: boolean) => {
+    if (!next) {
+      setPeriodicEnabled(false);
+      return;
+    }
+    try {
+      const current = await Notifications.getPermissionsAsync();
+      if (!current.granted) {
+        const req = await Notifications.requestPermissionsAsync();
+        if (!req.granted) {
+          Alert.alert(
+            'Notifications required',
+            'Periodic background sync needs notification permission so the app can keep syncing under Android battery limits. Enable notifications for copyparty and try again.',
+          );
+          return;
+        }
+      }
+      setPeriodicEnabled(true);
+    } catch (e) {
+      Alert.alert(
+        'Could not enable periodic sync',
+        e instanceof Error ? e.message : String(e),
+      );
+    }
+  };
+
+  const onChangePeriodicMinutes = (t: string) => {
+    setPeriodicMinutesText(t);
+    const n = parseInt(t, 10);
+    if (!Number.isNaN(n) && n > 0) setPeriodicMinutes(n);
+  };
+
+  const commitPeriodicMinutes = () => {
+    const clamped = Math.max(PERIODIC_MIN_INTERVAL_MIN, periodicMinutes);
+    setPeriodicMinutes(clamped);
+    setPeriodicMinutesText(String(clamped));
   };
 
   const confirmDelete = () => {
@@ -432,6 +504,24 @@ export default function JobEditScreen() {
             />
           </Field>
 
+          <SchedulePanel
+            enabled={periodicEnabled}
+            onToggleEnabled={onTogglePeriodic}
+            minutesText={periodicMinutesText}
+            onChangeMinutesText={onChangePeriodicMinutes}
+            onCommitMinutes={commitPeriodicMinutes}
+            minutes={periodicMinutes}
+            wifiOnly={wifiOnly}
+            onToggleWifi={setWifiOnly}
+            respectDataSaver={respectDataSaver}
+            onToggleDataSaver={setRespectDataSaver}
+            chargingOnly={chargingOnly}
+            onToggleCharging={setChargingOnly}
+            lastRunStartedAt={latestRun?.started_at ?? null}
+            inputStyle={inputStyle}
+            placeholder={placeholder}
+          />
+
           <Pressable
             onPress={onTest}
             disabled={!canTest}
@@ -627,7 +717,9 @@ function StatusDot({ status }: { status: RunRow['status'] }) {
         ? '#d08900'
         : status === 'failed'
           ? '#c33'
-          : '#888';
+          : status === 'skipped'
+            ? '#6a8caf'
+            : '#888';
   return <View style={[styles.statusDot, { backgroundColor: color }]} />;
 }
 
@@ -642,6 +734,110 @@ function formatBytes(n: number): string {
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KiB`;
   if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MiB`;
   return `${(n / 1024 / 1024 / 1024).toFixed(2)} GiB`;
+}
+
+function SchedulePanel(props: {
+  enabled: boolean;
+  onToggleEnabled: (next: boolean) => void;
+  minutesText: string;
+  onChangeMinutesText: (t: string) => void;
+  onCommitMinutes: () => void;
+  minutes: number;
+  wifiOnly: boolean;
+  onToggleWifi: (v: boolean) => void;
+  respectDataSaver: boolean;
+  onToggleDataSaver: (v: boolean) => void;
+  chargingOnly: boolean;
+  onToggleCharging: (v: boolean) => void;
+  lastRunStartedAt: number | null;
+  inputStyle: object[];
+  placeholder: string;
+}) {
+  const scheme = useColorScheme() ?? 'light';
+  const nextAt = props.enabled
+    ? nextPeriodicRunAt(
+        { periodic_enabled: 1, periodic_minutes: props.minutes },
+        props.lastRunStartedAt,
+        Date.now(),
+      )
+    : null;
+  return (
+    <View style={styles.field}>
+      <ThemedText style={styles.fieldLabel}>Schedule</ThemedText>
+      <View style={styles.scheduleRow}>
+        <ThemedText style={{ flex: 1 }}>Periodic background sync</ThemedText>
+        <Switch value={props.enabled} onValueChange={props.onToggleEnabled} />
+      </View>
+      {props.enabled ? (
+        <>
+          <View style={styles.scheduleIntervalRow}>
+            <ThemedText>Every</ThemedText>
+            <TextInput
+              value={props.minutesText}
+              onChangeText={props.onChangeMinutesText}
+              onBlur={props.onCommitMinutes}
+              keyboardType="number-pad"
+              style={[...props.inputStyle, styles.intervalInput]}
+              placeholder="60"
+              placeholderTextColor={props.placeholder}
+            />
+            <ThemedText>minutes</ThemedText>
+          </View>
+          <ThemedText style={styles.hint}>
+            Minimum {PERIODIC_MIN_INTERVAL_MIN} minutes. Android may delay ticks
+            further under battery optimization.
+          </ThemedText>
+
+          <View style={styles.scheduleRow}>
+            <ThemedText style={{ flex: 1 }}>Wi-Fi only</ThemedText>
+            <Switch value={props.wifiOnly} onValueChange={props.onToggleWifi} />
+          </View>
+          <View style={styles.scheduleRow}>
+            <View style={{ flex: 1 }}>
+              <ThemedText>Respect Data Saver</ThemedText>
+              <ThemedText style={styles.hint}>
+                Best-effort detection; improving soon.
+              </ThemedText>
+            </View>
+            <Switch
+              value={props.respectDataSaver}
+              onValueChange={props.onToggleDataSaver}
+            />
+          </View>
+          <View style={styles.scheduleRow}>
+            <ThemedText style={{ flex: 1 }}>Charging only</ThemedText>
+            <Switch
+              value={props.chargingOnly}
+              onValueChange={props.onToggleCharging}
+            />
+          </View>
+
+          <ThemedText style={[styles.hint, { color: Colors[scheme].tint }]}>
+            Next run: {nextRunLabel(nextAt, Date.now())}
+          </ThemedText>
+        </>
+      ) : (
+        <ThemedText style={styles.hint}>
+          Off — syncs only when you tap Sync now.
+        </ThemedText>
+      )}
+    </View>
+  );
+}
+
+function nextRunLabel(at: number | null, now: number): string {
+  if (at === null) return '—';
+  const diff = at - now;
+  const absDate = new Date(at).toLocaleTimeString([], {
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+  if (diff <= 0) return `overdue · ${absDate}`;
+  const totalMin = Math.round(diff / 60_000);
+  if (totalMin < 60) return `in ${totalMin}m · ${absDate}`;
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  return `in ${h}h ${m}m · ${absDate}`;
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
@@ -748,4 +944,22 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   deleteBtnText: { color: '#c33', fontWeight: '600' },
+  scheduleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 6,
+  },
+  scheduleIntervalRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 4,
+  },
+  intervalInput: {
+    width: 72,
+    textAlign: 'center',
+    paddingVertical: 6,
+    paddingHorizontal: 8,
+  },
 });

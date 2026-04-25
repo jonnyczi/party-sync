@@ -22,6 +22,8 @@ export interface JobRow {
   respect_data_saver: number;
   charging_only: number;
   rehash_interval_days: number;
+  periodic_enabled: number;
+  periodic_minutes: number;
   created_at: number;
   updated_at: number;
 }
@@ -37,7 +39,12 @@ export interface FileStateRow {
 }
 
 export type RunTrigger = 'manual' | 'periodic' | 'observer';
-export type RunStatus = 'running' | 'ok' | 'partial' | 'failed';
+export type RunStatus = 'running' | 'ok' | 'partial' | 'failed' | 'skipped';
+export type SkipReason =
+  | 'wifi_only'
+  | 'data_saver'
+  | 'charging_only'
+  | 'already_running';
 export type ErrorPhase = 'stat' | 'hash' | 'handshake' | 'upload' | 'finalize';
 
 export interface RunRow {
@@ -52,6 +59,7 @@ export interface RunRow {
   files_skipped: number;
   files_failed: number;
   bytes_uploaded: number;
+  skip_reason: string | null;
 }
 
 export interface RunErrorRow {

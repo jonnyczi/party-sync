@@ -8,6 +8,7 @@ import { getServer } from '../../db/servers';
 import type { JobRow, RunRow } from '../../db/types';
 import { getServerPassword } from '../../storage/secrets';
 import { runJob } from '../engine';
+import { withForegroundService } from '../foreground';
 import { defaultProgressBus } from '../progress';
 import { mediaWalker } from '../walker/media';
 import { safWalker } from '../walker/saf';
@@ -38,16 +39,18 @@ export async function runJobManual(
     password: password ?? undefined,
   });
 
-  return runJob(
-    {
-      db,
-      walker,
-      client,
-      fileSource: nativeFileSource,
-      progress: defaultProgressBus,
-    },
-    jobId,
-    'manual',
+  return withForegroundService(job.name, () =>
+    runJob(
+      {
+        db,
+        walker,
+        client,
+        fileSource: nativeFileSource,
+        progress: defaultProgressBus,
+      },
+      jobId,
+      'manual',
+    ),
   );
 }
 

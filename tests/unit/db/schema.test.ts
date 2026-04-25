@@ -56,6 +56,23 @@ describe('runMigrations', () => {
     expect(second).toEqual(first);
   });
 
+  it('migration v2 adds periodic fields to jobs and skip_reason to runs', async () => {
+    await runMigrations(db);
+    const jobCols = await db.getAllAsync<{ name: string }>(
+      "PRAGMA table_info('jobs')",
+      [],
+    );
+    const jobNames = jobCols.map((c) => c.name);
+    expect(jobNames).toContain('periodic_enabled');
+    expect(jobNames).toContain('periodic_minutes');
+
+    const runCols = await db.getAllAsync<{ name: string }>(
+      "PRAGMA table_info('runs')",
+      [],
+    );
+    expect(runCols.map((c) => c.name)).toContain('skip_reason');
+  });
+
   it('enables foreign key enforcement', async () => {
     await runMigrations(db);
     const row = await db.getFirstAsync<{ foreign_keys: number }>(

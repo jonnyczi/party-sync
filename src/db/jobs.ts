@@ -12,6 +12,8 @@ export interface JobInput {
   respect_data_saver?: boolean;
   charging_only?: boolean;
   rehash_interval_days?: number;
+  periodic_enabled?: boolean;
+  periodic_minutes?: number;
 }
 
 function bool(v: boolean | undefined, fallback: number): number {
@@ -51,8 +53,9 @@ export async function createJob(
     `INSERT INTO jobs (
        server_id, name, source_kind, source_uri, remote_path,
        propagate_deletes, wifi_only, respect_data_saver, charging_only,
-       rehash_interval_days, created_at, updated_at
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       rehash_interval_days, periodic_enabled, periodic_minutes,
+       created_at, updated_at
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       input.server_id,
       input.name,
@@ -64,6 +67,8 @@ export async function createJob(
       bool(input.respect_data_saver, 1),
       bool(input.charging_only, 0),
       input.rehash_interval_days ?? 30,
+      bool(input.periodic_enabled, 0),
+      input.periodic_minutes ?? 60,
       now,
       now,
     ],
@@ -80,7 +85,8 @@ export async function updateJob(
     `UPDATE jobs SET
        server_id = ?, name = ?, source_kind = ?, source_uri = ?, remote_path = ?,
        propagate_deletes = ?, wifi_only = ?, respect_data_saver = ?, charging_only = ?,
-       rehash_interval_days = ?, updated_at = ?
+       rehash_interval_days = ?, periodic_enabled = ?, periodic_minutes = ?,
+       updated_at = ?
      WHERE id = ?`,
     [
       input.server_id,
@@ -93,6 +99,8 @@ export async function updateJob(
       bool(input.respect_data_saver, 1),
       bool(input.charging_only, 0),
       input.rehash_interval_days ?? 30,
+      bool(input.periodic_enabled, 0),
+      input.periodic_minutes ?? 60,
       Date.now(),
       id,
     ],

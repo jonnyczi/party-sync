@@ -20,7 +20,13 @@
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
-      "package": "com.anonymous.copypartyclient"
+      "package": "com.anonymous.copypartyclient",
+      "permissions": [
+        "FOREGROUND_SERVICE",
+        "FOREGROUND_SERVICE_DATA_SYNC",
+        "POST_NOTIFICATIONS",
+        "ACCESS_NETWORK_STATE"
+      ]
     },
     "plugins": [
       "expo-router",
@@ -46,7 +52,9 @@
           "isAccessMediaLocationEnabled": false,
           "granularPermissions": ["photo", "video"]
         }
-      ]
+      ],
+      "expo-notifications",
+      "expo-background-task"
     ],
     "experiments": {
       "typedRoutes": true,

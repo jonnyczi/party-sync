@@ -11,6 +11,7 @@ import {
   listRunsForJob,
   listRunsSince,
   recordRunError,
+  recordSkippedRun,
   startRun,
   updateRunCounters,
 } from '@/src/db/runs';
@@ -191,5 +192,37 @@ describe('runs DAO', () => {
     const limited = await listRecentErrors(db, 2);
     expect(limited).toHaveLength(2);
     expect(limited[0].local_path).toBe('new');
+  });
+
+  it('recordSkippedRun writes an instantaneous row with skip_reason', async () => {
+    const id = await recordSkippedRun(db, {
+      job_id: jobId,
+      trigger: 'periodic',
+      skip_reason: 'wifi_only',
+    });
+    const row = await getRun(db, id);
+    expect(row?.status).toBe('skipped');
+    expect(row?.trigger).toBe('periodic');
+    expect(row?.skip_reason).toBe('wifi_only');
+    expect(row?.started_at).toBe(row?.finished_at);
+    expect(row?.files_scanned).toBe(0);
+    expect(row?.files_uploaded).toBe(0);
+    expect(row?.files_failed).toBe(0);
+    expect(row?.bytes_uploaded).toBe(0);
+  });
+
+  it('skipped runs appear in listRunsForJob / getLatestRunForJob', async () => {
+    const first = await startRun(db, { job_id: jobId, trigger: 'manual' });
+    await finishRun(db, first, { status: 'ok' });
+    await new Promise((r) => setTimeout(r, 2));
+    const skipped = await recordSkippedRun(db, {
+      job_id: jobId,
+      trigger: 'periodic',
+      skip_reason: 'charging_only',
+    });
+    const latest = await getLatestRunForJob(db, jobId);
+    expect(latest?.id).toBe(skipped);
+    const all = await listRunsForJob(db, jobId);
+    expect(all[0].id).toBe(skipped);
   });
 });
