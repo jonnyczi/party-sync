@@ -33,3 +33,8 @@ jobs:
       # add Dagger Cloud caching or a self-hosted runner to speed this up.
       - name: Build APK (unsigned)
         run: dagger call build-apk export --path ./out/app-release.apk
+
+      # F-Droid regression guard: fail if any Firebase/GMS class sneaks back in
+      # (e.g. a reintroduced expo-notifications), keeping the app F-Droid-clean.
+      - name: Scan APK for non-free (Firebase/GMS) classes
+        run: python3 scripts/scan-nonfree-apk.py ./out/app-release.apk

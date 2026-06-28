@@ -90,9 +90,23 @@ git commit -am "release vX.Y.Z" && git tag vX.Y.Z && git push --tags
 
 - **GitHub Releases** — `.github/workflows/release.yml` on tag `v*`: build signed
   APK + AAB, publish a Release with both + `SHA256SUMS`.
-- **F-Droid** — _(pending)_ F-Droid builds from source on its own infra from a
-  metadata recipe (`metadata/io.github.jonnyczi.copypartyclient.yml`). Enabled
-  by the de-Googling below.
+- **F-Droid** — builds from source on F-Droid's own buildserver (not Dagger/Nix)
+  and signs with its own key. Recipe drafted at
+  `metadata/io.github.jonnyczi.copypartyclient.yml`; submit a copy as an MR to
+  the `fdroiddata` repo. The non-free-deps CI gate (`scripts/scan-nonfree-apk.py`,
+  run in `ci.yml`) guards the de-Googling that makes this possible.
+
+  License is **MIT** (`LICENSE` at repo root). The recipe builds from the public
+  mirror **github.com/jonnyczi/copyparty-client**.
+
+  **Prerequisite before submitting:** push the source + the `vX.Y.Z` tag to that
+  public GitHub mirror (the canonical self-hosted repo is
+  `dev.jonnyczi-systems.com`).
+
+  **Validate locally before the MR** (Expo-on-Debian is fiddly — expect to
+  iterate): install `fdroidserver`, then
+  `fdroid build io.github.jonnyczi.copypartyclient` against the recipe. The
+  scanner must report no non-free libs and the build must produce the APK.
 - **Google Play** — _(pending)_ upload the AAB to the `internal` track via a
   service account.
 
