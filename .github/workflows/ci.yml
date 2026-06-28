@@ -6,35 +6,46 @@ on:
   pull_request:
   push:
     branches: [master]
+  workflow_dispatch: # manually run the heavy build job on demand
 
 # Pin the Dagger engine version to dagger.json's engineVersion.
 env:
   DAGGER_VERSION: "0.21.7"
 
 jobs:
-  checks:
+  # Fast checks — run on every push and PR (Node container, no Android toolchain).
+  lint-test:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-
       - name: Install Dagger CLI
         run: curl -fsSL https://dl.dagger.io/dagger/install.sh | DAGGER_VERSION="$DAGGER_VERSION" BIN_DIR=/usr/local/bin sh
-
       - name: Lint
         run: dagger call lint
-
       - name: Unit tests
         run: dagger call test
 
-      # Proves the app still builds from a clean prebuild (unsigned: no keystore
-      # secrets here, so withReleaseSigning falls back to debug signing). The
-      # nixos/nix build is cold on GitHub-hosted runners (no persistent /nix);
-      # add Dagger Cloud caching or a self-hosted runner to speed this up.
+  # Full release-APK build via the nixos/nix container. Heavy and slow on
+  # GitHub-hosted runners (cold nix store + Android SDK/NDK), so it only runs on
+  # PRs and manual dispatch — not on every master push. Tags build the real
+  # signed artifact via release.yml.
+  build:
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      # GitHub-hosted runners have only ~14 GB free on / (where Docker stores the
+      # Dagger engine + the cold nix store), which the Android toolchain blows
+      # past ("No space left on device"). Reclaim the ~25-30 GB of preinstalled
+      # tooling we don't use (.NET, Haskell, the runner's own Android SDK, etc.).
+      - name: Free disk space
+        uses: jlumbroso/free-disk-space@main
+      - name: Install Dagger CLI
+        run: curl -fsSL https://dl.dagger.io/dagger/install.sh | DAGGER_VERSION="$DAGGER_VERSION" BIN_DIR=/usr/local/bin sh
       - name: Build APK (unsigned)
         run: dagger call build-apk export --path ./out/app-release.apk
-
-      # F-Droid regression guard: fail if any Firebase/GMS class sneaks back in
-      # (e.g. a reintroduced expo-notifications), keeping the app F-Droid-clean.
+      # F-Droid regression guard: fail if any Firebase/GMS class sneaks back in.
       - name: Scan APK for non-free (Firebase/GMS) classes
         run: python3 scripts/scan-nonfree-apk.py ./out/app-release.apk
