@@ -60,9 +60,9 @@ Once an AVD is booted (see above), these are the commands that drive it:
 
 - `adb devices` — expect `emulator-5554 device`.
 - `adb shell getprop sys.boot_completed` — `1` once the OS is ready; `adb shell getprop init.svc.bootanim` returns `stopped` when the boot animation finishes.
-- App package: `com.anonymous.copypartyclient` (derived from `app.json`'s `expo.android.package` via `com.anonymous.<slug>` when no package is set explicitly).
-- After `expo run:android` the dev-client deep-link is fired but the app may not stay foregrounded. Bring it up with `adb shell monkey -p com.anonymous.copypartyclient -c android.intent.category.LAUNCHER 1`.
-- Verify foreground: `adb shell "dumpsys activity activities | grep topResumedActivity"` — look for `com.anonymous.copypartyclient/.MainActivity`.
+- App package: `io.github.jonnyczi.copypartyclient` (set explicitly via `app.json`'s `expo.android.package`). This is the permanent published applicationId across GitHub Releases, F-Droid, and Google Play; never reintroduce the old `com.anonymous.*` placeholder.
+- After `expo run:android` the dev-client deep-link is fired but the app may not stay foregrounded. Bring it up with `adb shell monkey -p io.github.jonnyczi.copypartyclient -c android.intent.category.LAUNCHER 1`.
+- Verify foreground: `adb shell "dumpsys activity activities | grep topResumedActivity"` — look for `io.github.jonnyczi.copypartyclient/.MainActivity`.
 - Screenshot: `adb exec-out screencap -p | magick png:- -resize 50% -quality 80 tmp/shot.jpg`, then Read the JPEG. `magick` (ImageMagick) comes from the devShell; the 50%/q80 downscale keeps UI text legible while cutting image tokens ~4× vs the raw 1080×2424 PNG (Claude vision tokens are pixel-count driven, not file-size driven).
 
 ## Testing against a copyparty server
