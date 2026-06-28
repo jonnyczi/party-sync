@@ -36,6 +36,15 @@
           pkgs.jdk17
           pkgs.gradle
           androidSdk
+          # Node toolchain (Expo CLI / prebuild / Metro bundle) pinned in the
+          # flake so the devShell is self-sufficient. Interactive dev previously
+          # relied on the host's node being on PATH; CI release builds run inside
+          # a bare `nixos/nix` container (via Dagger) where nothing but what the
+          # devShell declares exists — so node, curl (gradle-wrapper priming) and
+          # git (expo prebuild shells out to it) must be declared here.
+          pkgs.nodejs_22
+          pkgs.curl
+          pkgs.git
           # For downscaling emulator screencaps before feeding them to Claude —
           # vision tokens are driven by pixel count, not file size.
           pkgs.imagemagick

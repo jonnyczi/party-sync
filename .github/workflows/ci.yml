@@ -1,0 +1,35 @@
+# Thin CI wrapper: all real logic lives in the Dagger module (.dagger/), so this
+# is portable — the same `dagger call …` runs locally and on any CI with Docker.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+# Pin the Dagger engine version to dagger.json's engineVersion.
+env:
+  DAGGER_VERSION: "0.21.7"
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Dagger CLI
+        run: curl -fsSL https://dl.dagger.io/dagger/install.sh | DAGGER_VERSION="$DAGGER_VERSION" BIN_DIR=/usr/local/bin sh
+
+      - name: Lint
+        run: dagger call lint
+
+      - name: Unit tests
+        run: dagger call test
+
+      # Proves the app still builds from a clean prebuild (unsigned: no keystore
+      # secrets here, so withReleaseSigning falls back to debug signing). The
+      # nixos/nix build is cold on GitHub-hosted runners (no persistent /nix);
+      # add Dagger Cloud caching or a self-hosted runner to speed this up.
+      - name: Build APK (unsigned)
+        run: dagger call build-apk export --path ./out/app-release.apk

@@ -1,0 +1,73 @@
+# Release on tag `vX.Y.Z`: build signed artifacts via Dagger and publish a
+# GitHub Release. The AAB is uploaded too (for the later Google Play step).
+#
+# Required repository secrets (the upload keystore — NOT the Play app-signing
+# key, which Google manages under Play App Signing):
+#   UPLOAD_KEYSTORE_BASE64   base64 of the .keystore file
+#   UPLOAD_STORE_PASSWORD    keystore password
+#   UPLOAD_KEY_ALIAS         key alias
+#   UPLOAD_KEY_PASSWORD      key password
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+env:
+  DAGGER_VERSION: "0.21.7"
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: write # create the GitHub Release
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # Refuse to release if the tag and app.json version disagree, so the
+      # published versionName always matches the tag.
+      - name: Verify tag matches app.json version
+        run: node scripts/bump-version.mjs --check "${{ github.ref_name }}"
+
+      - name: Install Dagger CLI
+        run: curl -fsSL https://dl.dagger.io/dagger/install.sh | DAGGER_VERSION="$DAGGER_VERSION" BIN_DIR=/usr/local/bin sh
+
+      - name: Decode upload keystore
+        run: echo "${{ secrets.UPLOAD_KEYSTORE_BASE64 }}" | base64 -d > "$RUNNER_TEMP/upload.keystore"
+
+      - name: Build signed APK + AAB
+        env:
+          STORE_PW: ${{ secrets.UPLOAD_STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.UPLOAD_KEY_ALIAS }}
+          KEY_PW: ${{ secrets.UPLOAD_KEY_PASSWORD }}
+        run: |
+          dagger call build-apk \
+            --keystore="file:$RUNNER_TEMP/upload.keystore" \
+            --keystore-password=env:STORE_PW \
+            --key-alias=env:KEY_ALIAS \
+            --key-password=env:KEY_PW \
+            export --path ./out/copyparty-${{ github.ref_name }}.apk
+          dagger call build-aab \
+            --keystore="file:$RUNNER_TEMP/upload.keystore" \
+            --keystore-password=env:STORE_PW \
+            --key-alias=env:KEY_ALIAS \
+            --key-password=env:KEY_PW \
+            export --path ./out/copyparty-${{ github.ref_name }}.aab
+
+      - name: Checksums
+        working-directory: ./out
+        run: sha256sum copyparty-*.apk copyparty-*.aab > SHA256SUMS
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            out/copyparty-${{ github.ref_name }}.apk
+            out/copyparty-${{ github.ref_name }}.aab
+            out/SHA256SUMS
+          generate_release_notes: true
