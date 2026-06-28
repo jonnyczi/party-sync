@@ -13,10 +13,16 @@ expo-env.d.ts
 .kotlin/
 *.orig.*
 *.jks
+*.keystore
 *.p8
 *.p12
 *.key
 *.mobileprovision
+
+# Release signing material / build artifacts — never commit keystores or outputs
+/out/
+*.apk
+*.aab
 
 # Metro
 .metro-health-check*

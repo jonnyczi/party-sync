@@ -23,9 +23,9 @@ In the output, you'll find options to open the app in a
 - [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
 - [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
 
-## Run on the Android emulator (NixOS)
+## Running the app (NixOS)
 
-This project uses the native module `modules/copyparty-sha512`, so Expo Go is not supported — you need a dev build. The emulator + AVDs are managed on the host via Android Studio; the repo's `flake.nix` provides the build toolchain (JDK 17, Gradle, Android SDK, NDK, CMake).
+This project uses the native module `modules/copyparty-sha512`, so Expo Go is **not** supported — you need a dev build. The emulator + AVDs are managed on the host via Android Studio; the repo's `flake.nix` provides the build toolchain (JDK 17, Gradle, Android SDK, NDK, CMake). iOS simulator is macOS-only and not covered here.
 
 One-time host setup (NixOS only, symlink so the macOS-style SDK path resolves):
 
@@ -33,28 +33,59 @@ One-time host setup (NixOS only, symlink so the macOS-style SDK path resolves):
 mkdir -p ~/Library/Android && ln -sfn ~/Android/Sdk ~/Library/Android/sdk
 ```
 
-Each run:
+### 1. Start the Android emulator
 
-1. Start an AVD from any shell (Android Studio manages AVDs):
+The reliable launch path is **Android Studio → Device Manager → ▶ on an AVD**. The SDK's `emulator` binary is an unpatched FHS ELF, so launching it from a plain shell fails with `libX11.so.6: cannot open shared object file`. (Alternative: `emulator @<AVD_NAME>` works from any shell *only after* you add the X runtime libs to `programs.nix-ld.libraries` — see the lib list in `CLAUDE.md`.)
 
-   ```bash
-   emulator @<AVD_NAME>
-   adb devices   # confirm the emulator shows as `device`
-   ```
+Then confirm it's booted:
 
-2. Enter the dev shell and build + install the app:
+```bash
+adb devices                            # expect: emulator-5554   device
+adb shell getprop sys.boot_completed   # 1 when the OS is ready
+```
 
-   ```bash
-   nix develop
-   npm run android
-   ```
+### 2. Build & launch the dev build
 
-   This runs `expo run:android` (prebuild → Gradle build → install APK on the emulator → start Metro) and auto-launches the dev client on the emulator.
+Enter the dev shell and sanity-check you're in it — if `which java` prints nothing you are **not** in the devShell and the build will fail with `JAVA_HOME is not set`:
+
+```bash
+nix develop
+which java        # must print a path
+npm run android   # expo run:android: prebuild → Gradle build → install → Metro → launch
+```
+
+Or run it in one shot from outside the shell:
+
+```bash
+nix develop --command bash -c 'npm run android'
+```
 
 Notes:
 
 - First Gradle run downloads the distribution; `flake.nix`'s `shellHook` primes `~/.gradle/wrapper/dists/...` and bumps the wrapper's `networkTimeout` to 600s. If priming fails, the shell prints the exact `curl` command to retry.
 - Subsequent iterations only need Metro: `npm start` from inside `nix develop`.
+
+### 3. Bring up the copyparty test server
+
+The app talks to a [copyparty](https://github.com/9001/copyparty) server. A Dockerized one is provided for local dev:
+
+```bash
+npm run test:integration:up     # starts copyparty/ac:latest on :3923, waits for healthcheck
+npm run test:integration:down   # tear down (-v also drops the persisted volume for a clean slate)
+```
+
+It exposes a single account `test` / `testpw` with full access to one volume. Connect using:
+
+| From | URL |
+| --- | --- |
+| Host (curl, browser) | `http://127.0.0.1:3923` |
+| **Android emulator (the app)** | `http://10.0.2.2:3923` |
+
+`10.0.2.2` is the Android-emulator alias for the host's loopback. In the app, add a Server pointing at `http://10.0.2.2:3923` with user `test` / password `testpw`. Host-side sanity check:
+
+```bash
+curl -u test:testpw "http://127.0.0.1:3923/?ls=/"
+```
 
 You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
 

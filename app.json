@@ -9,7 +9,8 @@
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "io.github.jonnyczi.copypartyclient"
     },
     "android": {
       "adaptiveIcon": {
@@ -20,7 +21,8 @@
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
-      "package": "com.anonymous.copypartyclient",
+      "package": "io.github.jonnyczi.copypartyclient",
+      "versionCode": 1,
       "permissions": [
         "FOREGROUND_SERVICE",
         "FOREGROUND_SERVICE_DATA_SYNC",
@@ -53,8 +55,8 @@
           "granularPermissions": ["photo", "video"]
         }
       ],
-      "expo-notifications",
-      "expo-background-task"
+      "expo-background-task",
+      "./plugins/withReleaseSigning"
     ],
     "experiments": {
       "typedRoutes": true,

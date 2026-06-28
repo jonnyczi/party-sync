@@ -1,5 +1,4 @@
 import * as FileSystem from 'expo-file-system/legacy';
-import * as Notifications from 'expo-notifications';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useCallback, useEffect, useState } from 'react';
@@ -32,6 +31,7 @@ import {
 import { listServers } from '@/src/db/servers';
 import type { RunErrorRow, RunRow, ServerRow, SourceKind } from '@/src/db/types';
 import { getServerPassword } from '@/src/storage/secrets';
+import { ensureNotificationPermission } from '@/src/sync/notify-permission';
 import type { ActiveRunSnapshot } from '@/src/sync/progress';
 import {
   nextPeriodicRunAt,
@@ -204,16 +204,13 @@ export default function JobEditScreen() {
       return;
     }
     try {
-      const current = await Notifications.getPermissionsAsync();
-      if (!current.granted) {
-        const req = await Notifications.requestPermissionsAsync();
-        if (!req.granted) {
-          Alert.alert(
-            'Notifications required',
-            'Periodic background sync needs notification permission so the app can keep syncing under Android battery limits. Enable notifications for copyparty and try again.',
-          );
-          return;
-        }
+      const granted = await ensureNotificationPermission();
+      if (!granted) {
+        Alert.alert(
+          'Notifications required',
+          'Periodic background sync needs notification permission so the app can keep syncing under Android battery limits. Enable notifications for copyparty and try again.',
+        );
+        return;
       }
       setPeriodicEnabled(true);
     } catch (e) {

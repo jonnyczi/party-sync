@@ -1,0 +1,25 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'expo.modules.copypartynotify'
+version = '1.0.0'
+
+android {
+  namespace "expo.modules.copypartynotify"
+  defaultConfig {
+    versionCode 1
+    versionName "1.0.0"
+  }
+  lintOptions {
+    abortOnError false
+  }
+}
+
+dependencies {
+  // NotificationChannelCompat / NotificationManagerCompat / NotificationCompat —
+  // the entire local-notification surface lives in androidx.core. No Google Play
+  // Services / Firebase, which is the whole point of this module (F-Droid clean).
+  implementation 'androidx.core:core-ktx:1.13.1'
+}
