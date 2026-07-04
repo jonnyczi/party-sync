@@ -1,6 +1,9 @@
 package expo.modules.copypartynotify
 
+import android.app.PendingIntent
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import androidx.core.app.NotificationChannelCompat
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
@@ -12,8 +15,9 @@ import expo.modules.kotlin.modules.ModuleDefinition
  * Minimal, FOSS-only local notifications backed entirely by `androidx.core`.
  * This exists to replace `expo-notifications`, whose Android build pulls in
  * `com.google.firebase:firebase-messaging` (a hard F-Droid blocker) even when
- * only local notifications are used. We post exactly one ongoing low-importance
- * "sync in progress" notification, so the surface is deliberately tiny.
+ * only local notifications are used. We post an ongoing low-importance "sync in
+ * progress" notification plus tappable default-importance result notifications,
+ * so the surface is deliberately tiny.
  *
  * Android-only: the JS side uses `requireOptionalNativeModule`, so on iOS/web
  * the native object is null and the caller no-ops.
@@ -27,8 +31,9 @@ class CopypartyNotifyModule : Module() {
     }
 
     AsyncFunction("notify") {
-        channelId: String, notifId: Int, title: String, body: String, ongoing: Boolean ->
-      notify(channelId, notifId, title, body, ongoing)
+        channelId: String, notifId: Int, title: String, body: String, ongoing: Boolean,
+        deepLink: String? ->
+      notify(channelId, notifId, title, body, ongoing, deepLink)
     }
 
     AsyncFunction("dismiss") { notifId: Int ->
@@ -67,19 +72,44 @@ class CopypartyNotifyModule : Module() {
     title: String,
     body: String,
     ongoing: Boolean,
+    deepLink: String?,
   ) {
-    val notification = NotificationCompat.Builder(context, channelId)
+    val builder = NotificationCompat.Builder(context, channelId)
       // System sync glyph — avoids bundling a custom drawable and is available
       // on every API level.
       .setSmallIcon(android.R.drawable.stat_notify_sync)
       .setContentTitle(title)
       .setContentText(body)
+      // Expandable body so a multi-line result summary isn't truncated.
+      .setStyle(NotificationCompat.BigTextStyle().bigText(body))
       .setOngoing(ongoing)
-      .setSilent(true)
-      .setPriority(NotificationCompat.PRIORITY_LOW)
-      .build()
+
+    if (ongoing) {
+      // The persistent "Syncing…" notification: silent + low so it sits quietly
+      // in the shade for the run's duration.
+      builder.setSilent(true).setPriority(NotificationCompat.PRIORITY_LOW)
+    } else {
+      // Result notifications should alert. On API 26+ the channel's importance
+      // governs sound/heads-up; PRIORITY_DEFAULT covers older versions. Tapping
+      // dismisses it.
+      builder.setPriority(NotificationCompat.PRIORITY_DEFAULT).setAutoCancel(true)
+    }
+
+    if (deepLink != null) {
+      // ACTION_VIEW on the app's own scheme resolves to MainActivity (which
+      // carries the `copypartyclient://` intent-filter from app.json's
+      // expo.scheme), so the tap is routed by expo-router. setPackage keeps the
+      // intent in-app. FLAG_IMMUTABLE is required on API 31+.
+      val intent = Intent(Intent.ACTION_VIEW, Uri.parse(deepLink)).apply {
+        setPackage(context.packageName)
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+      }
+      val flags = PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+      builder.setContentIntent(PendingIntent.getActivity(context, notifId, intent, flags))
+    }
+
     // No-ops (logs) when POST_NOTIFICATIONS is denied on API 33+; never throws.
-    NotificationManagerCompat.from(context).notify(notifId, notification)
+    NotificationManagerCompat.from(context).notify(notifId, builder.build())
   }
 }
 

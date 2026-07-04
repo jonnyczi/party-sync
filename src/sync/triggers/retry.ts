@@ -8,6 +8,7 @@ import type { RunRow } from '../../db/types';
 import { getServerPassword } from '../../storage/secrets';
 import { runJob } from '../engine';
 import { withForegroundService } from '../foreground';
+import { notifyRunResult } from '../notify-result';
 import { defaultProgressBus } from '../progress';
 
 import { resolveWalker } from './manual';
@@ -47,7 +48,7 @@ export async function retryRunFailures(
     username: server.username ?? undefined,
   });
 
-  return withForegroundService(job.name, () =>
+  const result = await withForegroundService(job.name, () =>
     runJob(
       {
         db,
@@ -61,4 +62,6 @@ export async function retryRunFailures(
       'retry',
     ),
   );
+  await notifyRunResult(db, result, job);
+  return result;
 }

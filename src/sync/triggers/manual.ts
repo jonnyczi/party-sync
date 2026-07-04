@@ -9,6 +9,7 @@ import type { JobRow, RunRow } from '../../db/types';
 import { getServerPassword } from '../../storage/secrets';
 import { runJob } from '../engine';
 import { withForegroundService } from '../foreground';
+import { notifyRunResult } from '../notify-result';
 import { defaultProgressBus } from '../progress';
 import { mediaWalker } from '../walker/media';
 import { safWalker } from '../walker/saf';
@@ -40,7 +41,7 @@ export async function runJobManual(
     username: server.username ?? undefined,
   });
 
-  return withForegroundService(job.name, () =>
+  const run = await withForegroundService(job.name, () =>
     runJob(
       {
         db,
@@ -53,6 +54,8 @@ export async function runJobManual(
       'manual',
     ),
   );
+  await notifyRunResult(db, run, job);
+  return run;
 }
 
 /**

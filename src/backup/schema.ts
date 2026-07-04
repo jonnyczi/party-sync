@@ -41,6 +41,9 @@ export interface BackupJob {
   periodic_minutes: number;
   /** Optional for backward compat with pre-v4 backups; defaults on import. */
   max_concurrency?: number;
+  /** Per-job result-notification toggles; optional for older backups (default on). */
+  notify_on_success?: boolean;
+  notify_on_failure?: boolean;
 }
 
 export interface BackupBundleV1 {
@@ -54,6 +57,8 @@ export interface BackupBundleV1 {
   includesPasswords: boolean;
   servers: BackupServer[];
   jobs: BackupJob[];
+  /** App-wide preferences. Optional for backward compat with older backups. */
+  settings?: { resultNotifications: boolean };
 }
 
 const SOURCE_KINDS: readonly SourceKind[] = ['saf', 'media'];

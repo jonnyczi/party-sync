@@ -6,6 +6,7 @@ import { buildBundle } from '@/src/backup/serialize';
 import { createServer, listServers } from '@/src/db/servers';
 import { listJobs } from '@/src/db/jobs';
 import { runMigrations } from '@/src/db/schema';
+import { getResultNotificationsEnabled } from '@/src/db/settings';
 import type { JobRow, ServerRow } from '@/src/db/types';
 
 import { createTestDb } from '../db/adapter';
@@ -55,6 +56,8 @@ function bundle(): BackupBundleV1 {
       periodic_enabled: 0,
       periodic_minutes: 60,
       max_concurrency: 3,
+      notify_on_success: 0,
+      notify_on_failure: 1,
       created_at: 1,
       updated_at: 1,
     },
@@ -74,6 +77,8 @@ function bundle(): BackupBundleV1 {
       periodic_enabled: 0,
       periodic_minutes: 60,
       max_concurrency: 3,
+      notify_on_success: 1,
+      notify_on_failure: 1,
       created_at: 1,
       updated_at: 1,
     },
@@ -83,6 +88,7 @@ function bundle(): BackupBundleV1 {
     jobs,
     passwords: new Map([[10, 'hunter2']]),
     includePasswords: true,
+    resultNotifications: false,
     appVersion: '1.0.0',
   });
 }
@@ -109,6 +115,16 @@ describe('importBundle', () => {
     expect(saf.source_uri).toBe(''); // must be re-picked on this device
     expect(media.source_uri).toBe('all'); // portable sentinel preserved
     expect(jobs.every((j) => j.server_id === servers[0].id)).toBe(true);
+    // Per-job notification toggles survive the round-trip.
+    expect(saf.notify_on_success).toBe(0);
+    expect(saf.notify_on_failure).toBe(1);
+    expect(media.notify_on_success).toBe(1);
+  });
+
+  it('applies the global result-notifications setting from the bundle', async () => {
+    expect(await getResultNotificationsEnabled(db)).toBe(true); // default
+    await importBundle(db, bundle(), deps); // bundle carries resultNotifications=false
+    expect(await getResultNotificationsEnabled(db)).toBe(false);
   });
 
   it('skips a server that already exists (matched by url + username)', async () => {

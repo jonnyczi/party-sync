@@ -6,6 +6,7 @@ import {
   FlatList,
   Pressable,
   StyleSheet,
+  Switch,
   View,
 } from 'react-native';
 
@@ -15,18 +16,55 @@ import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { deleteServer, listServers } from '@/src/db/servers';
+import {
+  getResultNotificationsEnabled,
+  setResultNotificationsEnabled,
+} from '@/src/db/settings';
 import type { ServerRow } from '@/src/db/types';
 import { deleteServerPassword } from '@/src/storage/secrets';
+import { ensureNotificationPermission } from '@/src/sync/notify-permission';
 
 export default function SettingsScreen() {
   const db = useSQLiteContext();
   const router = useRouter();
   const scheme = useColorScheme() ?? 'light';
   const [servers, setServers] = useState<ServerRow[]>([]);
+  const [notifyEnabled, setNotifyEnabled] = useState(true);
 
   const refresh = useCallback(() => {
     listServers(db).then(setServers);
+    getResultNotificationsEnabled(db).then(setNotifyEnabled);
   }, [db]);
+
+  // Master kill-switch for sync result notifications. Enabling requests
+  // POST_NOTIFICATIONS (Android 13+); if denied, revert to off so the toggle
+  // reflects reality.
+  const onToggleNotify = async (next: boolean) => {
+    if (!next) {
+      setNotifyEnabled(false);
+      await setResultNotificationsEnabled(db, false);
+      return;
+    }
+    try {
+      const granted = await ensureNotificationPermission();
+      if (!granted) {
+        Alert.alert(
+          'Notifications disabled',
+          'Allow notifications for copyparty in system settings to get sync result alerts.',
+        );
+        setNotifyEnabled(false);
+        await setResultNotificationsEnabled(db, false);
+        return;
+      }
+      setNotifyEnabled(true);
+      await setResultNotificationsEnabled(db, true);
+    } catch (e) {
+      Alert.alert(
+        'Could not enable notifications',
+        e instanceof Error ? e.message : String(e),
+      );
+    }
+  };
 
   useFocusEffect(
     useCallback(() => {
@@ -57,6 +95,19 @@ export default function SettingsScreen() {
 
   return (
     <ThemedView style={styles.container}>
+      <View style={styles.notifySection}>
+        <ThemedText type="title">Notifications</ThemedText>
+        <View style={styles.notifyRow}>
+          <View style={styles.notifyText}>
+            <ThemedText type="defaultSemiBold">Sync results</ThemedText>
+            <ThemedText style={styles.rowSub}>
+              Notify when a sync finishes or fails. Per-job in each job&apos;s settings.
+            </ThemedText>
+          </View>
+          <Switch value={notifyEnabled} onValueChange={onToggleNotify} />
+        </View>
+      </View>
+
       <View style={styles.header}>
         <ThemedText type="title">Servers</ThemedText>
         <View style={styles.headerActions}>
@@ -126,6 +177,20 @@ export default function SettingsScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, paddingTop: 56 },
+  notifySection: {
+    paddingHorizontal: 16,
+    paddingBottom: 16,
+    gap: 8,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#8882',
+  },
+  notifyRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  notifyText: { flex: 1, gap: 2 },
   header: {
     flexDirection: 'row',
     alignItems: 'center',

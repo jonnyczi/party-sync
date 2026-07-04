@@ -34,6 +34,10 @@ export interface JobRow {
   periodic_minutes: number;
   /** Max files uploaded in parallel for this job (clamped 1–8; default 3). */
   max_concurrency: number;
+  /** Post a result notification when a run for this job succeeds (1) or not (0). */
+  notify_on_success: number;
+  /** Post a result notification when a run for this job fails/partials (1) or not (0). */
+  notify_on_failure: number;
   created_at: number;
   updated_at: number;
 }

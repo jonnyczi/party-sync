@@ -8,14 +8,19 @@ declare class CopypartyNotifyModule extends NativeModule<CopypartyNotifyModuleEv
   setChannel(channelId: string, name: string, importance: NotifyImportance): Promise<void>;
 
   /** Post (or update) the notification keyed by integer `notifId` on `channelId`.
-   *  `ongoing` makes it sticky/non-dismissable while a run is active. Silently
-   *  dropped by the system if POST_NOTIFICATIONS is not granted. */
+   *  `ongoing` makes it sticky/non-dismissable while a run is active (and silent
+   *  + low priority); non-ongoing notifications alert per the channel importance
+   *  and auto-cancel on tap. When `deepLink` is non-null the notification becomes
+   *  tappable, launching the app at that URL (an `expo.scheme` deep link routed
+   *  by expo-router). Silently dropped by the system if POST_NOTIFICATIONS is not
+   *  granted. */
   notify(
     channelId: string,
     notifId: number,
     title: string,
     body: string,
     ongoing: boolean,
+    deepLink: string | null,
   ): Promise<void>;
 
   /** Remove the notification with `notifId`. */

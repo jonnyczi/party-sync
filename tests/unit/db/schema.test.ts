@@ -101,6 +101,26 @@ describe('runMigrations', () => {
     expect(Number(dedupCol!.dflt_value)).toBe(0);
   });
 
+  it('migration v5 adds the settings table and notify columns to jobs', async () => {
+    await runMigrations(db);
+    const tables = await db.getAllAsync<{ name: string }>(
+      "SELECT name FROM sqlite_master WHERE type='table'",
+      [],
+    );
+    expect(tables.map((t) => t.name)).toContain('settings');
+
+    const jobCols = await db.getAllAsync<{ name: string; dflt_value: unknown }>(
+      "PRAGMA table_info('jobs')",
+      [],
+    );
+    const success = jobCols.find((c) => c.name === 'notify_on_success');
+    const failure = jobCols.find((c) => c.name === 'notify_on_failure');
+    expect(success).toBeTruthy();
+    expect(failure).toBeTruthy();
+    expect(Number(success!.dflt_value)).toBe(1);
+    expect(Number(failure!.dflt_value)).toBe(1);
+  });
+
   it('enables foreign key enforcement', async () => {
     await runMigrations(db);
     const row = await db.getFirstAsync<{ foreign_keys: number }>(

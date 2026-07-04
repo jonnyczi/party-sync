@@ -30,8 +30,16 @@ async function ensureChannel(): Promise<void> {
 async function showSyncNotification(jobName: string): Promise<void> {
   if (Platform.OS !== 'android' || !CopypartyNotify) return;
   await ensureChannel();
-  // `ongoing` keeps it sticky for the duration of the run.
-  await CopypartyNotify.notify(CHANNEL_ID, NOTIF_ID, 'copyparty', `Syncing: ${jobName}`, true);
+  // `ongoing` keeps it sticky for the duration of the run; null deep link — the
+  // sync notification isn't tappable (result notifications are, see notify-result).
+  await CopypartyNotify.notify(
+    CHANNEL_ID,
+    NOTIF_ID,
+    'copyparty',
+    `Syncing: ${jobName}`,
+    true,
+    null,
+  );
 }
 
 async function dismissSyncNotification(): Promise<void> {

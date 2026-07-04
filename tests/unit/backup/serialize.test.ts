@@ -39,6 +39,8 @@ function job(over: Partial<JobRow> = {}): JobRow {
     periodic_enabled: 1,
     periodic_minutes: 90,
     max_concurrency: 3,
+    notify_on_success: 1,
+    notify_on_failure: 1,
     created_at: 1,
     updated_at: 1,
     ...over,
@@ -51,6 +53,7 @@ function input(over: Partial<BuildBundleInput> = {}): BuildBundleInput {
     jobs: [job()],
     passwords: new Map([[1, 'hunter2']]),
     includePasswords: false,
+    resultNotifications: true,
     appVersion: '1.0.0',
     now: 12345,
     ...over,
@@ -95,6 +98,20 @@ describe('buildBundle', () => {
     const b = buildBundle(input({ jobs: [job({ server_id: 999 })] }));
     expect(b.jobs).toHaveLength(0);
   });
+
+  it('carries per-job notification toggles as booleans', () => {
+    const b = buildBundle(
+      input({ jobs: [job({ notify_on_success: 0, notify_on_failure: 1 })] }),
+    );
+    expect(b.jobs[0].notify_on_success).toBe(false);
+    expect(b.jobs[0].notify_on_failure).toBe(true);
+  });
+
+  it('carries the global result-notifications setting', () => {
+    expect(buildBundle(input({ resultNotifications: false })).settings).toEqual({
+      resultNotifications: false,
+    });
+  });
 });
 
 describe('parseBundle', () => {
@@ -129,5 +146,23 @@ describe('parseBundle', () => {
     const bundle: any = buildBundle(input());
     bundle.jobs[0].wifi_only = 'yes';
     expect(() => parseBundle(JSON.stringify(bundle))).toThrow(/wifi_only/i);
+  });
+
+  it('tolerates an older bundle with no settings or notify flags', () => {
+    const bundle: any = buildBundle(input());
+    delete bundle.settings;
+    delete bundle.jobs[0].notify_on_success;
+    delete bundle.jobs[0].notify_on_failure;
+    const parsed = parseBundle(JSON.stringify(bundle));
+    // Undefined → createJob will fill the on-by-default values on import.
+    expect(parsed.settings).toBeUndefined();
+    expect(parsed.jobs[0].notify_on_success).toBeUndefined();
+    expect(parsed.jobs[0].notify_on_failure).toBeUndefined();
+  });
+
+  it('ignores a malformed settings object', () => {
+    const bundle: any = buildBundle(input());
+    bundle.settings = { resultNotifications: 'nope' };
+    expect(parseBundle(JSON.stringify(bundle)).settings).toBeUndefined();
   });
 });

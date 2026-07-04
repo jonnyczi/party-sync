@@ -21,6 +21,8 @@ export interface JobInput {
   periodic_enabled?: boolean;
   periodic_minutes?: number;
   max_concurrency?: number;
+  notify_on_success?: boolean;
+  notify_on_failure?: boolean;
 }
 
 function bool(v: boolean | undefined, fallback: number): number {
@@ -67,8 +69,9 @@ export async function createJob(
        server_id, name, source_kind, source_uri, remote_path, path_organization,
        propagate_deletes, wifi_only, respect_data_saver, charging_only,
        rehash_interval_days, periodic_enabled, periodic_minutes, max_concurrency,
+       notify_on_success, notify_on_failure,
        created_at, updated_at
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       input.server_id,
       input.name,
@@ -84,6 +87,8 @@ export async function createJob(
       bool(input.periodic_enabled, 0),
       input.periodic_minutes ?? 60,
       clampConcurrency(input.max_concurrency),
+      bool(input.notify_on_success, 1),
+      bool(input.notify_on_failure, 1),
       now,
       now,
     ],
@@ -102,7 +107,7 @@ export async function updateJob(
        path_organization = ?,
        propagate_deletes = ?, wifi_only = ?, respect_data_saver = ?, charging_only = ?,
        rehash_interval_days = ?, periodic_enabled = ?, periodic_minutes = ?,
-       max_concurrency = ?,
+       max_concurrency = ?, notify_on_success = ?, notify_on_failure = ?,
        updated_at = ?
      WHERE id = ?`,
     [
@@ -120,6 +125,8 @@ export async function updateJob(
       bool(input.periodic_enabled, 0),
       input.periodic_minutes ?? 60,
       clampConcurrency(input.max_concurrency),
+      bool(input.notify_on_success, 1),
+      bool(input.notify_on_failure, 1),
       Date.now(),
       id,
     ],

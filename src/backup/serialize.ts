@@ -16,6 +16,8 @@ export interface BuildBundleInput {
   /** serverId -> password; consulted only when `includePasswords` is set. */
   passwords: Map<number, string | null>;
   includePasswords: boolean;
+  /** Current global "result notifications" preference, carried in the bundle. */
+  resultNotifications: boolean;
   appVersion: string;
   now?: number;
 }
@@ -61,6 +63,8 @@ export function buildBundle(input: BuildBundleInput): BackupBundleV1 {
       periodic_enabled: j.periodic_enabled === 1,
       periodic_minutes: j.periodic_minutes,
       max_concurrency: j.max_concurrency,
+      notify_on_success: j.notify_on_success === 1,
+      notify_on_failure: j.notify_on_failure === 1,
     };
     // Only `media` source URIs are portable (a sentinel); omit `saf` URIs.
     if (j.source_kind === 'media') job.source_uri = j.source_uri;
@@ -75,6 +79,7 @@ export function buildBundle(input: BuildBundleInput): BackupBundleV1 {
     includesPasswords: input.includePasswords && servers.some((s) => s.password),
     servers,
     jobs,
+    settings: { resultNotifications: input.resultNotifications },
   };
 }
 
@@ -186,6 +191,15 @@ export function parseBundle(text: string): BackupBundleV1 {
         jo.max_concurrency === undefined
           ? undefined
           : asNumber(jo.max_concurrency, `jobs[${i}].max_concurrency`),
+      // Older backups predate the notification toggles; createJob defaults to on.
+      notify_on_success:
+        jo.notify_on_success === undefined
+          ? undefined
+          : asBool(jo.notify_on_success, `jobs[${i}].notify_on_success`),
+      notify_on_failure:
+        jo.notify_on_failure === undefined
+          ? undefined
+          : asBool(jo.notify_on_failure, `jobs[${i}].notify_on_failure`),
     };
     if (jo.source_uri !== undefined) {
       job.source_uri = asString(jo.source_uri, `jobs[${i}].source_uri`);
@@ -201,5 +215,18 @@ export function parseBundle(text: string): BackupBundleV1 {
     includesPasswords: obj.includesPasswords === true,
     servers,
     jobs,
+    settings: parseSettings(obj.settings),
   };
+}
+
+/**
+ * Parse the optional `settings` object defensively — an older or hand-edited
+ * backup may omit it or carry junk. Returns undefined unless it contains a
+ * well-formed boolean, so import leaves the local preference untouched.
+ */
+function parseSettings(v: unknown): { resultNotifications: boolean } | undefined {
+  if (typeof v !== 'object' || v === null) return undefined;
+  const rn = (v as Record<string, unknown>).resultNotifications;
+  if (typeof rn !== 'boolean') return undefined;
+  return { resultNotifications: rn };
 }

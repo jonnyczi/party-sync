@@ -110,6 +110,8 @@ export default function JobEditScreen() {
   const [respectDataSaver, setRespectDataSaver] = useState(true);
   const [chargingOnly, setChargingOnly] = useState(false);
   const [maxConcurrency, setMaxConcurrency] = useState(DEFAULT_CONCURRENCY);
+  const [notifyOnSuccess, setNotifyOnSuccess] = useState(true);
+  const [notifyOnFailure, setNotifyOnFailure] = useState(true);
   const [loaded, setLoaded] = useState(isNew);
   const [saving, setSaving] = useState(false);
   // `starting` covers the gap between tapping Sync-now and the engine
@@ -157,6 +159,8 @@ export default function JobEditScreen() {
       setRespectDataSaver(row.respect_data_saver === 1);
       setChargingOnly(row.charging_only === 1);
       setMaxConcurrency(row.max_concurrency);
+      setNotifyOnSuccess(row.notify_on_success === 1);
+      setNotifyOnFailure(row.notify_on_failure === 1);
       setLoaded(true);
     });
   }, [db, isNew, jobId, router]);
@@ -235,6 +239,8 @@ export default function JobEditScreen() {
       respect_data_saver: respectDataSaver,
       charging_only: chargingOnly,
       max_concurrency: maxConcurrency,
+      notify_on_success: notifyOnSuccess,
+      notify_on_failure: notifyOnFailure,
     };
     try {
       if (isNew) {
@@ -674,6 +680,22 @@ export default function JobEditScreen() {
             inputStyle={inputStyle}
             placeholder={placeholder}
           />
+
+          <View style={styles.field}>
+            <ThemedText style={styles.fieldLabel}>Notifications</ThemedText>
+            <View style={styles.scheduleRow}>
+              <ThemedText style={{ flex: 1 }}>Notify on success</ThemedText>
+              <Switch value={notifyOnSuccess} onValueChange={setNotifyOnSuccess} />
+            </View>
+            <View style={styles.scheduleRow}>
+              <ThemedText style={{ flex: 1 }}>Notify on failure</ThemedText>
+              <Switch value={notifyOnFailure} onValueChange={setNotifyOnFailure} />
+            </View>
+            <ThemedText style={styles.hint}>
+              A tappable notification when a sync for this job finishes. Requires
+              notifications enabled in Settings.
+            </ThemedText>
+          </View>
 
           <Pressable
             onPress={onTest}

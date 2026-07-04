@@ -7,6 +7,7 @@ import * as Sharing from 'expo-sharing';
 import type { SqliteDb } from '@/src/db/adapter';
 import { listJobs } from '@/src/db/jobs';
 import { listServers } from '@/src/db/servers';
+import { getResultNotificationsEnabled } from '@/src/db/settings';
 import { getServerPassword, setServerPassword } from '@/src/storage/secrets';
 
 import type { RandomBytes } from './crypto';
@@ -45,6 +46,7 @@ export async function collectBundle(
     jobs,
     passwords,
     includePasswords,
+    resultNotifications: await getResultNotificationsEnabled(db),
     appVersion: appVersion(),
   });
 }

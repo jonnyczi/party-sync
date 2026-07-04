@@ -12,6 +12,7 @@ import { evaluateConstraints } from '../constraints';
 import { readConstraintState } from '../device-state';
 import { runJob } from '../engine';
 import { withForegroundService } from '../foreground';
+import { notifyRunResult } from '../notify-result';
 import { defaultProgressBus } from '../progress';
 import { isJobDueForPeriodic } from '../scheduler';
 import { mediaWalker } from '../walker/media';
@@ -102,7 +103,7 @@ async function runPeriodicJob(db: SqliteDb, job: JobRow): Promise<void> {
     username: server.username ?? undefined,
   });
 
-  await withForegroundService(job.name, () =>
+  const run = await withForegroundService(job.name, () =>
     runJob(
       {
         db,
@@ -115,6 +116,12 @@ async function runPeriodicJob(db: SqliteDb, job: JobRow): Promise<void> {
       'periodic',
     ),
   );
+  // Best-effort: a failed notification must not abort the periodic loop.
+  try {
+    await notifyRunResult(db, run, job);
+  } catch (e) {
+    console.warn(`[copyparty] result notification for job ${job.id} failed`, e);
+  }
 }
 
 /**

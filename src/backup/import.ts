@@ -1,6 +1,7 @@
 import type { SqliteDb } from '@/src/db/adapter';
 import { createJob, listJobs } from '@/src/db/jobs';
 import { createServer, listServers } from '@/src/db/servers';
+import { setResultNotificationsEnabled } from '@/src/db/settings';
 import { MEDIA_SOURCE_ALL } from '@/src/sync/walker/media';
 
 import type { BackupBundleV1 } from './schema';
@@ -114,9 +115,17 @@ export async function importBundle(
       periodic_enabled: j.periodic_enabled,
       periodic_minutes: j.periodic_minutes,
       max_concurrency: j.max_concurrency,
+      notify_on_success: j.notify_on_success,
+      notify_on_failure: j.notify_on_failure,
     });
     jobKeys.add(key);
     summary.jobsAdded++;
+  }
+
+  // Apply the global notification preference if the bundle carried one. Direct
+  // call (not via deps) is fine: src/db/settings has no native dependency.
+  if (bundle.settings) {
+    await setResultNotificationsEnabled(db, bundle.settings.resultNotifications);
   }
 
   return summary;

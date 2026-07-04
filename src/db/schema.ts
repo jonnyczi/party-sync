@@ -100,6 +100,18 @@ const MIGRATIONS: Migration[] = [
       ALTER TABLE runs ADD COLUMN bytes_deduped INTEGER NOT NULL DEFAULT 0;
     `,
   },
+  {
+    version: 5,
+    up: `
+      CREATE TABLE settings (
+        key   TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
+
+      ALTER TABLE jobs ADD COLUMN notify_on_success INTEGER NOT NULL DEFAULT 1;
+      ALTER TABLE jobs ADD COLUMN notify_on_failure INTEGER NOT NULL DEFAULT 1;
+    `,
+  },
 ];
 
 /**
