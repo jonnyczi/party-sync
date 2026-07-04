@@ -59,16 +59,27 @@ export default function SettingsScreen() {
     <ThemedView style={styles.container}>
       <View style={styles.header}>
         <ThemedText type="title">Servers</ThemedText>
-        <Pressable
-          onPress={() => router.push('/server/new')}
-          style={({ pressed }) => [
-            styles.addBtn,
-            { backgroundColor: Colors[scheme].tint, opacity: pressed ? 0.7 : 1 },
-          ]}
-          accessibilityLabel="Add server">
-          <IconSymbol name="plus" color="#fff" size={20} />
-          <ThemedText style={styles.addBtnText}>Add</ThemedText>
-        </Pressable>
+        <View style={styles.headerActions}>
+          <Pressable
+            onPress={() => router.push('/backup')}
+            style={({ pressed }) => [
+              styles.iconBtn,
+              { borderColor: Colors[scheme].tint, opacity: pressed ? 0.7 : 1 },
+            ]}
+            accessibilityLabel="Backup and restore">
+            <IconSymbol name="arrow.up.arrow.down" color={Colors[scheme].tint} size={20} />
+          </Pressable>
+          <Pressable
+            onPress={() => router.push('/server/new')}
+            style={({ pressed }) => [
+              styles.addBtn,
+              { backgroundColor: Colors[scheme].tint, opacity: pressed ? 0.7 : 1 },
+            ]}
+            accessibilityLabel="Add server">
+            <IconSymbol name="plus" color="#fff" size={20} />
+            <ThemedText style={styles.addBtnText}>Add</ThemedText>
+          </Pressable>
+        </View>
       </View>
 
       {servers.length === 0 ? (
@@ -122,6 +133,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingBottom: 12,
   },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   addBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -129,6 +141,14 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     paddingHorizontal: 12,
     borderRadius: 8,
+  },
+  iconBtn: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+    borderWidth: StyleSheet.hairlineWidth,
   },
   addBtnText: { color: '#fff', fontWeight: '600' },
   list: { paddingHorizontal: 16, paddingBottom: 24 },

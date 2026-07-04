@@ -123,7 +123,13 @@ export default function JobsScreen() {
                 <ThemedText style={styles.rowSub} numberOfLines={1}>
                   {item.serverName} → {item.job.remote_path}
                 </ThemedText>
-                <RunSummary run={item.lastRun} />
+                {item.job.source_kind === 'saf' && item.job.source_uri === '' ? (
+                  <ThemedText style={styles.needsSource} numberOfLines={1}>
+                    ⚠ Source not set — tap to choose a folder
+                  </ThemedText>
+                ) : (
+                  <RunSummary run={item.lastRun} />
+                )}
               </View>
               <IconSymbol name="chevron.right" color={Colors[scheme].icon} size={20} />
             </Pressable>
@@ -190,6 +196,7 @@ const styles = StyleSheet.create({
   runLine: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   runText: { opacity: 0.7, fontSize: 12, flexShrink: 1 },
   runMuted: { opacity: 0.5, fontSize: 12, fontStyle: 'italic' },
+  needsSource: { color: '#d08900', fontSize: 12 },
   statusDot: { width: 8, height: 8, borderRadius: 4 },
   empty: { paddingHorizontal: 24, paddingTop: 48, gap: 8 },
   emptyHint: { opacity: 0.7 },

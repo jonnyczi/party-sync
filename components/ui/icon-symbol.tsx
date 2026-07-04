@@ -32,6 +32,9 @@ const MAPPING = {
   'lock.fill': 'lock',
   'chevron.left': 'chevron-left',
   'xmark': 'close',
+  'arrow.up.arrow.down': 'import-export',
+  'square.and.arrow.up': 'file-upload',
+  'square.and.arrow.down': 'file-download',
 } as IconMapping;
 
 /**
