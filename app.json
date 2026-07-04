@@ -2,7 +2,7 @@
   "expo": {
     "name": "copyparty-client",
     "slug": "copyparty-client",
-    "version": "1.0.0",
+    "version": "0.1.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "copypartyclient",
@@ -56,7 +56,8 @@
         }
       ],
       "expo-background-task",
-      "./plugins/withReleaseSigning"
+      "./plugins/withReleaseSigning",
+      "./plugins/withCleartextTraffic"
     ],
     "experiments": {
       "typedRoutes": true,
