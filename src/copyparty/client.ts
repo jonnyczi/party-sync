@@ -1,3 +1,5 @@
+import { bytesToBase64 } from '../backup/base64';
+
 import type {
   HandshakeBody,
   HandshakeResponse,
@@ -10,9 +12,9 @@ export interface CopypartyClientOptions {
   baseUrl: string;
   password?: string;
   /**
-   * Optional account name. When set, the `PW` header carries `username:password`
-   * so the server can disambiguate the account — required when copyparty is run
-   * with `--usernames`. See {@link CopypartyClient.headers}.
+   * Optional account name. When set, the credential is sent as HTTP Basic auth
+   * (`username:password`) so it authenticates on `--usernames` servers as well
+   * as default ones. See {@link CopypartyClient.headers}.
    */
   username?: string;
   /** Extra fetch init merged into every request (e.g. for self-signed cert agents in Node tests). */
@@ -24,13 +26,17 @@ export interface CopypartyClientOptions {
 /**
  * Thin HTTP wrapper around copyparty's up2k endpoints.
  *
- * Auth: copyparty accepts the password via the `PW` request header (see
- * initial-plan.md "Auth"). By default copyparty matches the account from the
- * password alone and ignores any username. But when the server is started with
- * `--usernames`, the credential must be `username:password` — a bare password
- * is rejected. So when a `username` is configured we send `PW: user:pass`,
- * which copyparty also accepts on non-`--usernames` servers (it just finds the
- * password component), keeping this format safe for every server.
+ * Auth: copyparty matches the account from the password (it is globally unique
+ * across accounts). When NO username is configured we send the bare password in
+ * the `PW` request header (see initial-plan.md "Auth").
+ *
+ * When a username IS configured we instead send HTTP Basic auth
+ * (`Authorization: Basic base64(user:pass)`). This matters because copyparty
+ * matches the `PW` header *verbatim*, so `PW: user:pass` only works on
+ * `--usernames` servers and is rejected (403) by default ones; Basic auth is
+ * parsed by trying the `user:pass`, `pass`, and `user` components, so it
+ * authenticates on both. (Limitation: a server run with `--no-bauth` disables
+ * Basic auth — uncommon, and not handled here.)
  *
  * URL handling: every request takes a `folderPath` (e.g. `/phone-backups/`)
  * which is joined to `baseUrl`. The trailing slash is required by copyparty
@@ -144,9 +150,18 @@ export class CopypartyClient {
   private headers(extra: Record<string, string>): Record<string, string> {
     const h: Record<string, string> = { ...extra };
     if (this.password) {
-      h['PW'] = this.username
-        ? `${this.username}:${this.password}`
-        : this.password;
+      if (this.username) {
+        // HTTP Basic auth carries `user:pass` in a form copyparty accepts on
+        // both `--usernames` and default servers (the verbatim `PW: user:pass`
+        // header 403s on the latter). TextEncoder gives correct UTF-8 for
+        // non-ASCII credentials; bytesToBase64 is Hermes-safe (no btoa).
+        const creds = bytesToBase64(
+          new TextEncoder().encode(`${this.username}:${this.password}`),
+        );
+        h['Authorization'] = `Basic ${creds}`;
+      } else {
+        h['PW'] = this.password;
+      }
     }
     return h;
   }

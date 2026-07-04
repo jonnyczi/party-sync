@@ -1,5 +1,6 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 
+import { CopypartyClient } from '../../src/copyparty/client';
 import {
   TestConnectionError,
   testJobConnection,
@@ -9,6 +10,7 @@ import {
 import {
   COPYPARTY_PW,
   COPYPARTY_URL,
+  COPYPARTY_USER,
   copypartyReachable,
   uniqueRemoteFolder,
 } from './helpers';
@@ -55,6 +57,36 @@ describe('testServerConnection', () => {
       name: 'TestConnectionError',
       kind: 'unreachable',
     });
+  });
+});
+
+describe('Basic auth when a username is set', () => {
+  // Regression for the 403 a username-bearing Server hit against a copyparty
+  // that is NOT run with --usernames (the docker test server). The old
+  // verbatim `PW: user:pass` header is rejected there; HTTP Basic auth
+  // authenticates on both server types.
+  it('authenticates as the account (not anonymous) via CopypartyClient', async () => {
+    requireServer();
+    const client = new CopypartyClient({
+      baseUrl: COPYPARTY_URL,
+      username: COPYPARTY_USER,
+      password: COPYPARTY_PW,
+    });
+    const ls = await client.listFolder('/');
+    // acct '*' would mean the credential was rejected (anonymous fallback).
+    expect(ls.acct).toBe(COPYPARTY_USER);
+    expect(ls.perms).toContain('write');
+  });
+
+  it('testServerConnection resolves with a username set', async () => {
+    requireServer();
+    await expect(
+      testServerConnection({
+        baseUrl: COPYPARTY_URL,
+        username: COPYPARTY_USER,
+        password: COPYPARTY_PW,
+      }),
+    ).resolves.toBeUndefined();
   });
 });
 

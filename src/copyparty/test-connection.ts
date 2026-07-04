@@ -35,7 +35,7 @@ export class TestConnectionError extends Error {
 export interface TestServerOptions {
   baseUrl: string;
   password: string;
-  /** Account name, sent as `PW: username:password` when set (see CopypartyClient). */
+  /** Account name; sent via HTTP Basic auth when set (see CopypartyClient). */
   username?: string | null;
   certSha256?: string | null;
 }

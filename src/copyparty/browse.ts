@@ -21,7 +21,7 @@ export interface BrowseResult {
 export async function browseFolder(opts: {
   baseUrl: string;
   password?: string;
-  /** Account name, sent as `PW: username:password` when set (see CopypartyClient). */
+  /** Account name; sent via HTTP Basic auth when set (see CopypartyClient). */
   username?: string | null;
   path: string;
 }): Promise<BrowseResult> {
