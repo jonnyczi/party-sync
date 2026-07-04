@@ -1,4 +1,4 @@
-import { CopypartyClient } from '../copyparty/client';
+import { CopypartyClient, RequestCancelledError } from '../copyparty/client';
 import type { FileSource } from '../copyparty/hash';
 import { Up2kError } from '../copyparty/types';
 import { uploadFile } from '../copyparty/up2k';
@@ -26,6 +26,12 @@ import type { SourceWalker, WalkerEntry } from './walker/types';
 // 2 inter-attempt sleeps, hence 2 entries.
 const HTTP_RETRY_ATTEMPTS = 3;
 const HTTP_RETRY_BACKOFF_MS = [1000, 2000];
+
+// How often mid-run counters are flushed to the `runs` row. The live UI reads
+// the in-memory ProgressBus, but persisting periodically means (a) DB-backed
+// screens (run detail, history) reflect progress without waiting for the run to
+// finish, and (b) a run interrupted by an app kill keeps its partial numbers.
+const COUNTER_PERSIST_INTERVAL_MS = 1000;
 
 export interface EngineOptions {
   db: SqliteDb;
@@ -68,6 +74,10 @@ export async function runJob(
   if (!job) throw new Error(`job ${jobId} not found`);
 
   const runId = await runsDao.startRun(opts.db, { job_id: jobId, trigger });
+  // Register the cancel controller *before* publishing the run to the UI, so a
+  // cancel can never race ahead of the signal existing. The signal is threaded
+  // into every fetch to tear down in-flight uploads on cancel/timeout.
+  const signal = runControl.register(runId);
   const startedAt = now();
   progress.startRun({ runId, jobId, trigger, startedAt });
 
@@ -82,6 +92,23 @@ export async function runJob(
   // First fatal (401/403) error: stops the pool scheduling new files; in-flight
   // uploads are allowed to settle.
   let fatal: unknown = null;
+
+  // Throttled persistence of the live counters to the `runs` row (see
+  // COUNTER_PERSIST_INTERVAL_MS). `finishRun` writes the authoritative final
+  // values, so this only needs to keep the mid-run snapshot fresh-ish.
+  let lastPersistedAt = 0;
+  const persistCounters = async (force = false): Promise<void> => {
+    if (!force && now() - lastPersistedAt < COUNTER_PERSIST_INTERVAL_MS) return;
+    lastPersistedAt = now();
+    await runsDao.updateRunCounters(opts.db, runId, {
+      files_scanned: scanned,
+      files_uploaded: uploaded,
+      files_skipped: skipped,
+      files_failed: failed,
+      bytes_uploaded: bytesUploaded,
+      bytes_deduped: bytesDeduped,
+    });
+  };
 
   try {
     progress.setPhase('scanning');
@@ -102,6 +129,9 @@ export async function runJob(
     scanned = entries.length;
     progress.bumpCounters({ scanned });
     progress.setTotals({ totalFiles: entries.length, totalBytes });
+    // Persist the scan result immediately so a DB-backed screen shows the
+    // denominator while the upload phase runs.
+    await persistCounters(true);
 
     progress.setPhase('uploading');
 
@@ -145,6 +175,7 @@ export async function runJob(
           remoteFolder,
           lmod,
           precomputedSize: entry.size,
+          signal,
           onProgress: ({ bytesUploaded: b }) => {
             progress.updateFileBytes(entry.localPath, b);
           },
@@ -168,6 +199,12 @@ export async function runJob(
           uploaded_at: now(),
         });
       } catch (e) {
+        // A file torn down by cancellation isn't a failure — the run is being
+        // stopped on purpose. Swallow it (the `finally` still ends the file) so
+        // it isn't logged or counted as failed; the run finalizes as 'cancelled'.
+        if (e instanceof RequestCancelledError || runControl.isCancelRequested(runId)) {
+          return;
+        }
         const phase = classifyErrorPhase(e);
         const httpStatus = e instanceof Up2kError ? e.httpStatus : undefined;
         const message = e instanceof Error ? e.message : String(e);
@@ -205,6 +242,7 @@ export async function runJob(
         const idx = nextIndex++;
         if (idx >= entries.length) return;
         await processEntry(entries[idx]);
+        await persistCounters();
       }
     };
     await Promise.all(Array.from({ length: poolSize }, () => worker()));
@@ -276,6 +314,8 @@ function isFatalForRun(e: unknown): boolean {
 }
 
 function isRetryable(e: unknown): boolean {
+  // A deliberate cancel must never be retried.
+  if (e instanceof RequestCancelledError) return false;
   if (e instanceof Up2kError) {
     if (e.httpStatus === undefined) return true; // network-ish
     if (e.httpStatus >= 500 && e.httpStatus < 600) return true;
@@ -311,9 +351,10 @@ function withRetry(
   // uploadFile only ever calls .handshake and .uploadChunk on the client;
   // everything else stays on `base`. Cast to satisfy the concrete type.
   const wrapped: Pick<CopypartyClient, 'handshake' | 'uploadChunk'> = {
-    handshake: (folderPath, body) => attempt(() => base.handshake(folderPath, body)),
-    uploadChunk: (folderPath, headers, body) =>
-      attempt(() => base.uploadChunk(folderPath, headers, body)),
+    handshake: (folderPath, body, signal) =>
+      attempt(() => base.handshake(folderPath, body, signal)),
+    uploadChunk: (folderPath, headers, body, signal) =>
+      attempt(() => base.uploadChunk(folderPath, headers, body, signal)),
   };
   return wrapped as CopypartyClient;
 }

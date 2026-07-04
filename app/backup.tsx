@@ -50,6 +50,8 @@ export default function BackupScreen() {
   const [importPassphrase, setImportPassphrase] = useState('');
 
   const tint = Colors[scheme].tint;
+  const accent = Colors[scheme].accent;
+  const onAccent = Colors[scheme].onAccent;
   const inputStyle = [
     styles.input,
     { color: Colors[scheme].text, borderColor: Colors[scheme].icon },
@@ -215,9 +217,9 @@ export default function BackupScreen() {
               disabled={busy}
               style={({ pressed }) => [
                 styles.primaryBtn,
-                { backgroundColor: tint, opacity: busy ? 0.5 : pressed ? 0.8 : 1 },
+                { backgroundColor: accent, opacity: busy ? 0.5 : pressed ? 0.8 : 1 },
               ]}>
-              <IconSymbol name="square.and.arrow.up" color="#fff" size={20} />
+              <IconSymbol name="square.and.arrow.up" color={onAccent} size={20} />
               <ThemedText style={styles.primaryBtnText}>Export to file</ThemedText>
             </Pressable>
           </View>
@@ -237,9 +239,9 @@ export default function BackupScreen() {
               disabled={busy}
               style={({ pressed }) => [
                 styles.primaryBtn,
-                { backgroundColor: tint, opacity: busy ? 0.5 : pressed ? 0.8 : 1 },
+                { backgroundColor: accent, opacity: busy ? 0.5 : pressed ? 0.8 : 1 },
               ]}>
-              <IconSymbol name="square.and.arrow.down" color="#fff" size={20} />
+              <IconSymbol name="square.and.arrow.down" color={onAccent} size={20} />
               <ThemedText style={styles.primaryBtnText}>Import from file</ThemedText>
             </Pressable>
           </View>

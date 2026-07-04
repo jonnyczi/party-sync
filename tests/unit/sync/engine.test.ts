@@ -448,6 +448,55 @@ describe('engine.runJob', () => {
     // The engine's `finally` clears the cancel registry entry.
     expect(isCancelRequested(run.id)).toBe(false);
   });
+
+  it('tears down an in-flight upload on cancel without counting it as failed', async () => {
+    await db.runAsync('UPDATE jobs SET max_concurrency = 1 WHERE id = ?', [jobId]);
+    const entries = [makeEntry('a.bin', 1000), makeEntry('b.bin', 1000)];
+    const progress = new ProgressBus();
+
+    // Abort-honoring fetch (a real fetch rejects when its signal aborts; the
+    // shared makeFakeServer mock does not, so we roll a minimal one here).
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit): Promise<Response> => {
+      if (init?.signal?.aborted) throw new DOMException('aborted', 'AbortError');
+      const headers = normalizeHeaders(init?.headers);
+      if (!headers['x-up2k-hash']) {
+        const body = JSON.parse(init?.body as string) as { name: string; hash: string[] };
+        return jsonResponse({ name: body.name, purl: '', wark: `w-${body.name}`, hash: body.hash, sprs: true });
+      }
+      return new Response('', { status: 200 });
+    });
+    const client = new CopypartyClient({
+      baseUrl: 'http://localhost:9999',
+      fetch: fetchMock as unknown as typeof fetch,
+    });
+
+    const base = makeFileSource(entries);
+    const fileSource: FileSource = {
+      size: base.size,
+      hashFileChunks: base.hashFileChunks,
+      async readRange(uri, car, cdr) {
+        // Cancel while the first file's chunk is being read → its subsequent
+        // upload POST hits an already-aborted signal and is torn down.
+        if (uri === entries[0].uri) {
+          const runId = progress.getSnapshot().activeRun?.runId;
+          if (runId != null) requestCancel(runId);
+        }
+        return base.readRange(uri, car, cdr);
+      },
+    };
+
+    const run = await runJob(
+      { db, walker: fakeWalker(entries), client, fileSource, progress, sleep: noSleep },
+      jobId,
+    );
+
+    expect(run.status).toBe('cancelled');
+    // The aborted in-flight file completed neither as uploaded nor as failed…
+    expect(run.files_uploaded).toBe(0);
+    expect(run.files_failed).toBe(0);
+    // …and it was not recorded as a per-file error.
+    expect(await listRunErrors(db, run.id)).toHaveLength(0);
+  });
 });
 
 // ---------------------------------------------------------------------------

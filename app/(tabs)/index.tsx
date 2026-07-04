@@ -1,11 +1,12 @@
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Alert, Pressable, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { IconSymbol } from '@/components/ui/icon-symbol';
+import { statusColor } from '@/constants/status-colors';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { formatEta, formatRate, useEta } from '@/hooks/use-eta';
@@ -18,6 +19,7 @@ import {
 } from '@/src/db/runs';
 import { listServers } from '@/src/db/servers';
 import type { JobRow, RunRow, ServerRow } from '@/src/db/types';
+import { requestCancel } from '@/src/sync/run-control';
 import {
   aggregateRuns,
   bucketBytesByDay,
@@ -39,6 +41,7 @@ export default function HomeScreen() {
   const [servers, setServers] = useState<ServerRow[]>([]);
   const [runs, setRuns] = useState<RunRow[]>([]);
   const [recentErrors, setRecentErrors] = useState<RecentErrorRow[]>([]);
+  const [refreshing, setRefreshing] = useState(false);
 
   const refresh = useCallback(async () => {
     const now = Date.now();
@@ -56,16 +59,25 @@ export default function HomeScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      refresh();
+      refresh().catch((e) => console.warn('dashboard refresh failed', e));
     }, [refresh]),
   );
 
   // Re-pull the moment a run finishes so stats/errors don't lag a focus event.
   const prevActive = useRef<ActiveRunSnapshot | null>(null);
   useEffect(() => {
-    if (prevActive.current && !activeRun) refresh();
+    if (prevActive.current && !activeRun) {
+      refresh().catch((e) => console.warn('dashboard refresh failed', e));
+    }
     prevActive.current = activeRun;
   }, [activeRun, refresh]);
+
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    refresh()
+      .catch((e) => console.warn('dashboard refresh failed', e))
+      .finally(() => setRefreshing(false));
+  }, [refresh]);
 
   const jobsById = new Map<number, JobRow>(jobs.map((j) => [j.id, j]));
   const now = Date.now();
@@ -85,7 +97,15 @@ export default function HomeScreen() {
         <ThemedText type="title">Dashboard</ThemedText>
       </View>
 
-      <ScrollView contentContainerStyle={styles.scroll}>
+      <ScrollView
+        contentContainerStyle={styles.scroll}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={Colors[scheme].icon}
+          />
+        }>
         {isFresh ? (
           <OnboardingCard
             onAddServer={() => router.push('/(tabs)/settings')}
@@ -228,20 +248,34 @@ function ActiveRunCard({
         : 'Uploading';
   const eta = formatEta(etaMs);
   const rate = formatRate(rateBytesPerSec);
+  const onCancelPress = () => {
+    Alert.alert(
+      'Cancel sync?',
+      'Stop the current sync run. Files already uploaded are kept; the rest resume next time.',
+      [
+        { text: 'Keep syncing', style: 'cancel' },
+        {
+          text: 'Cancel sync',
+          style: 'destructive',
+          onPress: () => requestCancel(run.runId),
+        },
+      ],
+    );
+  };
   return (
     <Pressable
       onPress={onOpen}
       style={({ pressed }) => [
         styles.hero,
         {
-          borderColor: Colors[scheme].tint,
-          backgroundColor: Colors[scheme].tint + '15',
+          borderColor: Colors[scheme].accent,
+          backgroundColor: Colors[scheme].accentWash,
           opacity: pressed ? 0.85 : 1,
         },
       ]}
       accessibilityLabel="Open active sync job">
       <View style={styles.heroHeader}>
-        <IconSymbol name="arrow.triangle.2.circlepath" color={Colors[scheme].tint} size={18} />
+        <IconSymbol name="arrow.triangle.2.circlepath" color={Colors[scheme].accent} size={18} />
         <ThemedText type="defaultSemiBold" style={{ flex: 1 }} numberOfLines={1}>
           {jobName}
         </ThemedText>
@@ -251,7 +285,7 @@ function ActiveRunCard({
         <View
           style={[
             styles.progressFill,
-            { width: `${pct}%`, backgroundColor: Colors[scheme].tint },
+            { width: `${pct}%`, backgroundColor: Colors[scheme].accent },
           ]}
         />
       </View>
@@ -291,20 +325,30 @@ function ActiveRunCard({
         {run.counters.failed} failed
       </ThemedText>
       {run.dedupedBytes > 0 ? (
-        <ThemedText style={styles.heroDedup}>
+        <ThemedText style={[styles.heroDedup, { color: Colors[scheme].success }]}>
           saved {formatBytes(run.dedupedBytes)} via dedup
         </ThemedText>
       ) : null}
       {run.errors.length > 0 ? (
         <View style={{ marginTop: 4, gap: 2 }}>
           {run.errors.slice(-3).map((e, i) => (
-            <ThemedText key={i} style={styles.heroError} numberOfLines={1}>
+            <ThemedText key={i} style={[styles.heroError, { color: Colors[scheme].danger }]} numberOfLines={1}>
               {e.phase}: {basename(e.localPath) || '(run)'} —{' '}
               {e.message ?? `HTTP ${e.httpStatus}`}
             </ThemedText>
           ))}
         </View>
       ) : null}
+      <Pressable
+        onPress={onCancelPress}
+        hitSlop={8}
+        style={({ pressed }) => [styles.heroCancel, { opacity: pressed ? 0.6 : 1 }]}
+        accessibilityLabel="Cancel sync">
+        <IconSymbol name="xmark.circle.fill" color={Colors[scheme].danger} size={16} />
+        <ThemedText style={[styles.heroCancelText, { color: Colors[scheme].danger }]}>
+          Cancel
+        </ThemedText>
+      </Pressable>
     </Pressable>
   );
 }
@@ -324,7 +368,7 @@ function LastRunCard({
       onPress={onOpen}
       style={({ pressed }) => [
         styles.hero,
-        { borderColor: '#8884', opacity: pressed ? 0.7 : 1 },
+        { borderColor: Colors[scheme].border, opacity: pressed ? 0.7 : 1 },
       ]}>
       <View style={styles.heroHeader}>
         <StatusDot status={run.status} />
@@ -337,10 +381,10 @@ function LastRunCard({
         {new Date(run.started_at).toLocaleString()}
       </ThemedText>
       <ThemedText style={styles.heroMuted}>
-        {run.files_uploaded}↑ / {run.files_skipped}= / {run.files_failed}✗ ·{' '}
-        {formatBytes(run.bytes_uploaded)}
+        {run.files_uploaded} uploaded · {run.files_skipped} skipped ·{' '}
+        {run.files_failed} failed · {formatBytes(run.bytes_uploaded)}
       </ThemedText>
-      <ThemedText style={[styles.heroMuted, { color: Colors[scheme].tint }]}>
+      <ThemedText style={[styles.heroMuted, { color: Colors[scheme].accent }]}>
         Tap to open →
       </ThemedText>
     </Pressable>
@@ -348,12 +392,13 @@ function LastRunCard({
 }
 
 function IdleNoRunsCard({ onOpenJobs }: { onOpenJobs: () => void }) {
+  const scheme = useColorScheme() ?? 'light';
   return (
     <Pressable
       onPress={onOpenJobs}
       style={({ pressed }) => [
         styles.hero,
-        { borderColor: '#8884', opacity: pressed ? 0.7 : 1 },
+        { borderColor: Colors[scheme].border, opacity: pressed ? 0.7 : 1 },
       ]}>
       <ThemedText type="defaultSemiBold">No runs yet</ThemedText>
       <ThemedText style={styles.heroMuted}>
@@ -485,19 +530,8 @@ function RunLine({ run }: { run: RunRow | null }) {
 }
 
 function StatusDot({ status }: { status: RunRow['status'] }) {
-  const color =
-    status === 'ok'
-      ? '#2a9d3f'
-      : status === 'partial'
-        ? '#d08900'
-        : status === 'failed'
-          ? '#c33'
-          : status === 'skipped'
-            ? '#6a8caf'
-            : status === 'cancelled'
-              ? '#6c757d'
-              : '#888';
-  return <View style={[styles.statusDot, { backgroundColor: color }]} />;
+  const scheme = useColorScheme() ?? 'light';
+  return <View style={[styles.statusDot, { backgroundColor: statusColor(status, scheme) }]} />;
 }
 
 function SummaryCell({
@@ -509,9 +543,12 @@ function SummaryCell({
   value: string;
   bad?: boolean;
 }) {
+  const scheme = useColorScheme() ?? 'light';
   return (
     <View style={styles.summaryCell}>
-      <ThemedText type="title" style={[styles.summaryValue, bad ? { color: '#c33' } : undefined]}>
+      <ThemedText
+        type="title"
+        style={[styles.summaryValue, bad ? { color: Colors[scheme].danger } : undefined]}>
         {value}
       </ThemedText>
       <ThemedText style={styles.summaryLabel}>{label}</ThemedText>
@@ -565,6 +602,15 @@ const styles = StyleSheet.create({
   heroFilePct: { fontSize: 12, opacity: 0.7, fontVariant: ['tabular-nums'] },
   heroDedup: { fontSize: 12, color: '#2a9d3f' },
   heroError: { fontSize: 11, color: '#c33' },
+  heroCancel: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: 6,
+    marginTop: 8,
+    paddingVertical: 4,
+  },
+  heroCancelText: { fontSize: 13, fontWeight: '600' },
   progressTrack: {
     height: 6,
     borderRadius: 3,

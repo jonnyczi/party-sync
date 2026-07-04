@@ -92,6 +92,7 @@ export function RemotePathBrowser({
   const text = Colors[scheme].text;
   const icon = Colors[scheme].icon;
   const tint = Colors[scheme].tint;
+  const accent = Colors[scheme].accent;
 
   const onUse = () => {
     onSelect(path);
@@ -180,7 +181,7 @@ export function RemotePathBrowser({
             style={({ pressed }) => [
               styles.useBtn,
               {
-                backgroundColor: writable && !loading ? tint : icon,
+                backgroundColor: writable && !loading ? accent : icon,
                 opacity: pressed ? 0.85 : 1,
               },
             ]}>

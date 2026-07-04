@@ -41,7 +41,7 @@ export function SyncBanner() {
       onPress={() => router.push(`/job/${run.jobId}`)}
       style={({ pressed }) => [
         styles.banner,
-        { backgroundColor: Colors[scheme].tint, opacity: pressed ? 0.85 : 1 },
+        { backgroundColor: Colors[scheme].accent, opacity: pressed ? 0.85 : 1 },
       ]}
       accessibilityLabel="Open active sync job">
       <IconSymbol name="arrow.triangle.2.circlepath" color="#fff" size={18} />

@@ -10,6 +10,7 @@ import {
   listRunErrors,
   listRunsForJob,
   listRunsSince,
+  reconcileInterruptedRuns,
   recordRunError,
   recordSkippedRun,
   startRun,
@@ -61,6 +62,25 @@ describe('runs DAO', () => {
     const row = await getRun(db, runId);
     expect(row?.bytes_uploaded).toBe(1000);
     expect(row?.bytes_deduped).toBe(4096);
+  });
+
+  it('reconcileInterruptedRuns marks stuck running rows interrupted, leaving others', async () => {
+    const stuck = await startRun(db, { job_id: jobId, trigger: 'periodic' });
+    const done = await startRun(db, { job_id: jobId, trigger: 'manual' });
+    await finishRun(db, done, { status: 'ok' });
+
+    const n = await reconcileInterruptedRuns(db);
+    expect(n).toBe(1);
+
+    const stuckRow = await getRun(db, stuck);
+    expect(stuckRow?.status).toBe('interrupted');
+    expect(stuckRow?.finished_at).not.toBeNull();
+
+    // A completed run is untouched.
+    expect((await getRun(db, done))?.status).toBe('ok');
+
+    // Idempotent: nothing left to reconcile on a second pass.
+    expect(await reconcileInterruptedRuns(db)).toBe(0);
   });
 
   it('updateRunCounters only touches provided fields', async () => {

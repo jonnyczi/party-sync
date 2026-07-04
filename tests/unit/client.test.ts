@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { base64ToBytes } from '../../src/backup/base64';
-import { CopypartyClient } from '../../src/copyparty/client';
+import { CopypartyClient, RequestCancelledError } from '../../src/copyparty/client';
 
 function okLs(): Response {
   return new Response(JSON.stringify({ acct: 'test', perms: ['read'], files: [], dirs: [] }), {
@@ -89,5 +89,54 @@ describe('CopypartyClient auth header', () => {
     await new CopypartyClient({ baseUrl: 'http://h', username: 'jonnyczi' }).listFolder('/');
     expect(pwHeader(fetchMock)).toBeUndefined();
     expect(authHeader(fetchMock)).toBeUndefined();
+  });
+});
+
+describe('CopypartyClient timeouts & cancellation', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('hands a combined abort signal to fetch', async () => {
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => okLs());
+    vi.stubGlobal('fetch', fetchMock);
+    await new CopypartyClient({ baseUrl: 'http://h' }).listFolder('/');
+    const init = fetchMock.mock.calls.at(-1)?.[1] as RequestInit | undefined;
+    expect(init?.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it('throws RequestCancelledError when the caller aborts (non-retryable)', async () => {
+    const fetchMock = vi.fn(
+      (_url: string, init: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          const sig = init.signal;
+          const fail = () => reject(new DOMException('aborted', 'AbortError'));
+          if (sig?.aborted) fail();
+          else sig?.addEventListener('abort', fail);
+        }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const ac = new AbortController();
+    ac.abort();
+    await expect(
+      new CopypartyClient({ baseUrl: 'http://h' }).listFolder('/', ac.signal),
+    ).rejects.toBeInstanceOf(RequestCancelledError);
+  });
+
+  it('times out a stalled request as a retryable error, not a cancel', async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn(
+      (_url: string, init: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          init.signal?.addEventListener('abort', () =>
+            reject(new DOMException('aborted', 'AbortError')),
+          );
+        }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const p = new CopypartyClient({ baseUrl: 'http://h' }).listFolder('/');
+    const expectation = expect(p).rejects.toThrow(/timed out/);
+    await vi.advanceTimersByTimeAsync(20_000); // LS_TIMEOUT_MS
+    await expectation;
   });
 });

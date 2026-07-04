@@ -1,11 +1,20 @@
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
-import { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, Pressable, StyleSheet, View } from 'react-native';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  ActivityIndicator,
+  Alert,
+  FlatList,
+  Pressable,
+  RefreshControl,
+  StyleSheet,
+  View,
+} from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { IconSymbol } from '@/components/ui/icon-symbol';
+import { statusColor } from '@/constants/status-colors';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useSyncProgress } from '@/hooks/use-sync-progress';
@@ -36,35 +45,65 @@ export default function RunDetailScreen() {
   const [data, setData] = useState<LoadedRun | null>(null);
   const [notFound, setNotFound] = useState(false);
   const [retrying, setRetrying] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const { activeRun } = useSyncProgress();
 
-  useEffect(() => {
+  const load = useCallback(async () => {
     if (!Number.isFinite(runId)) {
       setNotFound(true);
       return;
     }
-    let cancelled = false;
-    (async () => {
-      const run = await getRun(db, runId);
-      if (!run) {
-        if (!cancelled) setNotFound(true);
-        return;
-      }
-      const [job, errors] = await Promise.all([
-        getJob(db, run.job_id),
-        listRunErrors(db, run.id),
-      ]);
-      if (!job) {
-        if (!cancelled) setNotFound(true);
-        return;
-      }
-      const server = await getServer(db, job.server_id);
-      if (!cancelled) setData({ run, job, server, errors });
-    })();
-    return () => {
-      cancelled = true;
-    };
+    const run = await getRun(db, runId);
+    if (!run) {
+      setNotFound(true);
+      return;
+    }
+    const [job, errors] = await Promise.all([
+      getJob(db, run.job_id),
+      listRunErrors(db, run.id),
+    ]);
+    if (!job) {
+      setNotFound(true);
+      return;
+    }
+    const server = await getServer(db, job.server_id);
+    setData({ run, job, server, errors });
   }, [db, runId]);
+
+  // Initial load. Surface failures instead of silently no-opping.
+  useEffect(() => {
+    load().catch((e) => console.warn('run detail load failed', e));
+  }, [load]);
+
+  // While this run is the active one, the engine persists counters to the
+  // `runs` row (~1s) and writes per-file errors immediately — so re-query on a
+  // short interval to reflect progress live without leaving the screen.
+  const isThisRunActive = activeRun?.runId === runId;
+  useEffect(() => {
+    if (!isThisRunActive) return;
+    const t = setInterval(() => {
+      load().catch(() => {});
+    }, 1500);
+    return () => clearInterval(t);
+  }, [isThisRunActive, load]);
+
+  // When the active run ends, reload once for the final status/counters/duration.
+  const wasActive = useRef(false);
+  useEffect(() => {
+    if (isThisRunActive) {
+      wasActive.current = true;
+    } else if (wasActive.current) {
+      wasActive.current = false;
+      load().catch(() => {});
+    }
+  }, [isThisRunActive, load]);
+
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    load()
+      .catch((e) => console.warn('run detail refresh failed', e))
+      .finally(() => setRefreshing(false));
+  }, [load]);
 
   if (notFound) {
     return (
@@ -88,6 +127,9 @@ export default function RunDetailScreen() {
     run.finished_at !== null ? formatDuration(run.finished_at - run.started_at) : '…';
   // Single-slot progress bus: a retry can't start while any run is active.
   const retryDisabled = retrying || activeRun !== null;
+  // Disabled specifically because *another* run is in flight (not this screen's
+  // own retry starting) — worth explaining so the greyed button isn't a mystery.
+  const blockedByOtherRun = !retrying && activeRun !== null;
 
   const onRetry = () => {
     setRetrying(true);
@@ -134,7 +176,7 @@ export default function RunDetailScreen() {
               {formatBytes(run.bytes_uploaded)} uploaded
             </ThemedText>
             {run.bytes_deduped > 0 ? (
-              <ThemedText style={styles.dedupLine}>
+              <ThemedText style={[styles.dedupLine, { color: Colors[scheme].success }]}>
                 {formatBytes(run.bytes_deduped)} saved via dedup
               </ThemedText>
             ) : null}
@@ -145,13 +187,18 @@ export default function RunDetailScreen() {
                 disabled={retryDisabled}
                 style={({ pressed }) => [
                   styles.retryBtn,
-                  { opacity: retryDisabled ? 0.5 : pressed ? 0.8 : 1 },
+                  { backgroundColor: Colors[scheme].warning, opacity: retryDisabled ? 0.5 : pressed ? 0.8 : 1 },
                 ]}>
-                <IconSymbol name="arrow.clockwise" color="#fff" size={16} />
+                <IconSymbol name="arrow.clockwise" color={Colors[scheme].onAccent} size={16} />
                 <ThemedText style={styles.retryBtnText}>
                   {retrying ? 'Starting…' : `Retry failed (${run.files_failed})`}
                 </ThemedText>
               </Pressable>
+            ) : null}
+            {run.files_failed > 0 && blockedByOtherRun ? (
+              <ThemedText style={styles.retryHint}>
+                A sync is already running — retry when it finishes.
+              </ThemedText>
             ) : null}
 
             <Pressable
@@ -182,17 +229,25 @@ export default function RunDetailScreen() {
         keyExtractor={(e) => String(e.id)}
         renderItem={({ item }) => <ErrorRow err={item} />}
         contentContainerStyle={styles.listContent}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={Colors[scheme].icon}
+          />
+        }
       />
     </ThemedView>
   );
 }
 
 function ErrorRow({ err }: { err: RunErrorRow }) {
+  const scheme = useColorScheme() ?? 'light';
   const statusText = err.http_status != null ? `HTTP ${err.http_status}` : '—';
   return (
-    <View style={styles.errorRow}>
+    <View style={[styles.errorRow, { borderBottomColor: Colors[scheme].border }]}>
       <View style={styles.errorHeadline}>
-        <ThemedText style={styles.errorPhase}>{err.phase}</ThemedText>
+        <ThemedText style={[styles.errorPhase, { color: Colors[scheme].danger }]}>{err.phase}</ThemedText>
         <ThemedText style={styles.errorStatus}>{statusText}</ThemedText>
       </View>
       <ThemedText style={styles.errorPath} selectable numberOfLines={3}>
@@ -208,11 +263,12 @@ function ErrorRow({ err }: { err: RunErrorRow }) {
 }
 
 function Stat({ label, value, bad }: { label: string; value: string; bad?: boolean }) {
+  const scheme = useColorScheme() ?? 'light';
   return (
-    <View style={styles.stat}>
+    <View style={[styles.stat, { borderColor: Colors[scheme].border }]}>
       <ThemedText
         type="title"
-        style={[styles.statValue, bad ? { color: '#c33' } : undefined]}>
+        style={[styles.statValue, bad ? { color: Colors[scheme].danger } : undefined]}>
         {value}
       </ThemedText>
       <ThemedText style={styles.statLabel}>{label}</ThemedText>
@@ -221,18 +277,9 @@ function Stat({ label, value, bad }: { label: string; value: string; bad?: boole
 }
 
 function StatusPill({ status }: { status: RunRow['status'] }) {
-  const bg =
-    status === 'ok'
-      ? '#2a9d3f'
-      : status === 'partial'
-        ? '#d08900'
-        : status === 'failed'
-          ? '#c33'
-          : status === 'cancelled'
-            ? '#6c757d'
-            : '#888';
+  const scheme = useColorScheme() ?? 'light';
   return (
-    <View style={[styles.pill, { backgroundColor: bg }]}>
+    <View style={[styles.pill, { backgroundColor: statusColor(status, scheme) }]}>
       <ThemedText style={styles.pillText}>{status}</ThemedText>
     </View>
   );
@@ -289,6 +336,7 @@ const styles = StyleSheet.create({
     marginTop: 12,
   },
   retryBtnText: { color: '#fff', fontWeight: '700' },
+  retryHint: { opacity: 0.6, fontSize: 12, marginTop: 6, fontStyle: 'italic' },
   openJobBtn: {
     flexDirection: 'row',
     alignItems: 'center',

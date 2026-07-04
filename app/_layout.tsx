@@ -8,7 +8,9 @@ import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import 'react-native-reanimated';
 
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { reconcileInterruptedRuns } from '@/src/db/runs';
 import { configureConnection, runMigrations } from '@/src/db/schema';
+import { defaultProgressBus } from '@/src/sync/progress';
 import {
   definePeriodicTask,
   syncPeriodicRegistration,
@@ -42,6 +44,14 @@ function LoadingScreen() {
 function PeriodicRegistrar() {
   const db = useSQLiteContext();
   useEffect(() => {
+    // Heal runs orphaned in 'running' by a prior process that was killed
+    // mid-sync. Guarded on the in-memory bus so it can never clobber a run
+    // that's genuinely active in this process.
+    if (defaultProgressBus.getSnapshot().activeRun === null) {
+      reconcileInterruptedRuns(db).catch((e) => {
+        console.warn('[copyparty] reconcileInterruptedRuns failed', e);
+      });
+    }
     syncPeriodicRegistration(db).catch((e) => {
       console.warn('[copyparty] syncPeriodicRegistration failed', e);
     });
@@ -59,7 +69,6 @@ export default function RootLayout() {
           <PeriodicRegistrar />
           <Stack>
             <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-            <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
             <Stack.Screen
               name="server/[id]"
               options={{ title: 'Server', presentation: 'modal' }}

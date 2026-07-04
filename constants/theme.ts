@@ -16,6 +16,23 @@ export const Colors = {
     icon: '#687076',
     tabIconDefault: '#687076',
     tabIconSelected: tintColorLight,
+    // Accent is used as a *fill* behind `onAccent`-colored content. It is
+    // deliberately distinct from `tint`: tint is white in dark mode (a
+    // foreground colour), so using tint as a background renders white-on-white.
+    accent: '#0a7ea4',
+    onAccent: '#fff',
+    accentWash: '#0a7ea415',
+    // Surfaces
+    card: '#ffffff',
+    border: '#0000001f',
+    // Semantic status colours — resolved via statusColor() in
+    // constants/status-colors.ts. Tuned for a light background.
+    success: '#2a9d3f',
+    warning: '#d08900',
+    danger: '#c0392b',
+    skipped: '#5a7fa6',
+    muted: '#6c757d',
+    running: '#0a7ea4',
   },
   dark: {
     text: '#ECEDEE',
@@ -24,6 +41,18 @@ export const Colors = {
     icon: '#9BA1A6',
     tabIconDefault: '#9BA1A6',
     tabIconSelected: tintColorDark,
+    accent: '#0a7ea4',
+    onAccent: '#fff',
+    accentWash: '#0a7ea433',
+    card: '#1e2022',
+    border: '#ffffff26',
+    // Brightened so red/green/blue keep contrast against the near-black bg.
+    success: '#3fca5c',
+    warning: '#e0a72e',
+    danger: '#ff6b6b',
+    skipped: '#8fb3d9',
+    muted: '#9ba1a6',
+    running: '#38bdf8',
   },
 };
 

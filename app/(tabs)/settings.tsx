@@ -5,6 +5,7 @@ import {
   Alert,
   FlatList,
   Pressable,
+  RefreshControl,
   StyleSheet,
   Switch,
   View,
@@ -30,11 +31,23 @@ export default function SettingsScreen() {
   const scheme = useColorScheme() ?? 'light';
   const [servers, setServers] = useState<ServerRow[]>([]);
   const [notifyEnabled, setNotifyEnabled] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
 
-  const refresh = useCallback(() => {
-    listServers(db).then(setServers);
-    getResultNotificationsEnabled(db).then(setNotifyEnabled);
+  const refresh = useCallback(async () => {
+    const [srv, notify] = await Promise.all([
+      listServers(db),
+      getResultNotificationsEnabled(db),
+    ]);
+    setServers(srv);
+    setNotifyEnabled(notify);
   }, [db]);
+
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    refresh()
+      .catch((e) => console.warn('settings refresh failed', e))
+      .finally(() => setRefreshing(false));
+  }, [refresh]);
 
   // Master kill-switch for sync result notifications. Enabling requests
   // POST_NOTIFICATIONS (Android 13+); if denied, revert to off so the toggle
@@ -68,7 +81,7 @@ export default function SettingsScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      refresh();
+      refresh().catch((e) => console.warn('settings refresh failed', e));
     }, [refresh]),
   );
 
@@ -95,7 +108,7 @@ export default function SettingsScreen() {
 
   return (
     <ThemedView style={styles.container}>
-      <View style={styles.notifySection}>
+      <View style={[styles.notifySection, { borderBottomColor: Colors[scheme].border }]}>
         <ThemedText type="title">Notifications</ThemedText>
         <View style={styles.notifyRow}>
           <View style={styles.notifyText}>
@@ -124,10 +137,10 @@ export default function SettingsScreen() {
             onPress={() => router.push('/server/new')}
             style={({ pressed }) => [
               styles.addBtn,
-              { backgroundColor: Colors[scheme].tint, opacity: pressed ? 0.7 : 1 },
+              { backgroundColor: Colors[scheme].accent, opacity: pressed ? 0.7 : 1 },
             ]}
             accessibilityLabel="Add server">
-            <IconSymbol name="plus" color="#fff" size={20} />
+            <IconSymbol name="plus" color={Colors[scheme].onAccent} size={20} />
             <ThemedText style={styles.addBtnText}>Add</ThemedText>
           </Pressable>
         </View>
@@ -145,13 +158,20 @@ export default function SettingsScreen() {
           data={servers}
           keyExtractor={(s) => String(s.id)}
           contentContainerStyle={styles.list}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              tintColor={Colors[scheme].icon}
+            />
+          }
           renderItem={({ item }) => (
             <Pressable
               onPress={() => router.push(`/server/${item.id}`)}
               onLongPress={() => confirmDelete(item)}
               style={({ pressed }) => [
                 styles.row,
-                { opacity: pressed ? 0.6 : 1 },
+                { borderBottomColor: Colors[scheme].border, opacity: pressed ? 0.6 : 1 },
               ]}>
               <View style={styles.rowMain}>
                 <ThemedText type="defaultSemiBold">{item.name}</ThemedText>

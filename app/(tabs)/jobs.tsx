@@ -1,14 +1,16 @@
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
-import { useCallback, useState } from 'react';
-import { Alert, FlatList, Pressable, StyleSheet, View } from 'react-native';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Alert, FlatList, Pressable, RefreshControl, StyleSheet, View } from 'react-native';
 
 import { SyncBanner } from '@/components/sync-banner';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { IconSymbol } from '@/components/ui/icon-symbol';
+import { statusColor } from '@/constants/status-colors';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { useSyncProgress } from '@/hooks/use-sync-progress';
 import { deleteJob, listJobs } from '@/src/db/jobs';
 import { listServers } from '@/src/db/servers';
 import { getLatestRunForJob } from '@/src/db/runs';
@@ -26,6 +28,8 @@ export default function JobsScreen() {
   const scheme = useColorScheme() ?? 'light';
   const [rows, setRows] = useState<JobRowView[]>([]);
   const [hasServers, setHasServers] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const { activeRun } = useSyncProgress();
 
   const refresh = useCallback(async () => {
     const [jobs, servers] = await Promise.all([listJobs(db), listServers(db)]);
@@ -43,9 +47,27 @@ export default function JobsScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      refresh();
+      refresh().catch((e) => console.warn('jobs refresh failed', e));
     }, [refresh]),
   );
+
+  // When a run finishes while this tab is focused, the SyncBanner clears itself
+  // (it reads the bus) but each row's last-run summary is DB-backed — refresh it
+  // so the row reflects the just-completed run instead of staying stale.
+  const prevActive = useRef(false);
+  useEffect(() => {
+    if (prevActive.current && !activeRun) {
+      refresh().catch((e) => console.warn('jobs refresh failed', e));
+    }
+    prevActive.current = activeRun !== null;
+  }, [activeRun, refresh]);
+
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    refresh()
+      .catch((e) => console.warn('jobs refresh failed', e))
+      .finally(() => setRefreshing(false));
+  }, [refresh]);
 
   const confirmDelete = (row: JobRowView) => {
     Alert.alert(
@@ -84,10 +106,10 @@ export default function JobsScreen() {
           onPress={onAdd}
           style={({ pressed }) => [
             styles.addBtn,
-            { backgroundColor: Colors[scheme].tint, opacity: pressed ? 0.7 : 1 },
+            { backgroundColor: Colors[scheme].accent, opacity: pressed ? 0.7 : 1 },
           ]}
           accessibilityLabel="Add job">
-          <IconSymbol name="plus" color="#fff" size={20} />
+          <IconSymbol name="plus" color={Colors[scheme].onAccent} size={20} />
           <ThemedText style={styles.addBtnText}>Add</ThemedText>
         </Pressable>
       </View>
@@ -108,11 +130,21 @@ export default function JobsScreen() {
           data={rows}
           keyExtractor={(r) => String(r.job.id)}
           contentContainerStyle={styles.list}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              tintColor={Colors[scheme].icon}
+            />
+          }
           renderItem={({ item }) => (
             <Pressable
               onPress={() => router.push(`/job/${item.job.id}`)}
               onLongPress={() => confirmDelete(item)}
-              style={({ pressed }) => [styles.row, { opacity: pressed ? 0.6 : 1 }]}>
+              style={({ pressed }) => [
+                styles.row,
+                { borderBottomColor: Colors[scheme].border, opacity: pressed ? 0.6 : 1 },
+              ]}>
               <IconSymbol
                 name={item.job.source_kind === 'media' ? 'photo.on.rectangle' : 'folder.fill'}
                 color={Colors[scheme].icon}
@@ -141,23 +173,14 @@ export default function JobsScreen() {
 }
 
 function RunSummary({ run }: { run: RunRow | null }) {
+  const scheme = useColorScheme() ?? 'light';
   if (!run) {
     return <ThemedText style={styles.runMuted}>Never synced</ThemedText>;
   }
   const when = new Date(run.started_at).toLocaleString();
-  const color =
-    run.status === 'ok'
-      ? '#2a9d3f'
-      : run.status === 'partial'
-        ? '#d08900'
-        : run.status === 'failed'
-          ? '#c33'
-          : run.status === 'cancelled'
-            ? '#6c757d'
-            : '#888';
   return (
     <View style={styles.runLine}>
-      <View style={[styles.statusDot, { backgroundColor: color }]} />
+      <View style={[styles.statusDot, { backgroundColor: statusColor(run.status, scheme) }]} />
       <ThemedText style={styles.runText} numberOfLines={1}>
         {when} · {run.status} · {run.files_uploaded} up, {run.files_skipped} skipped
         {run.files_failed > 0 ? `, ${run.files_failed} failed` : ''}

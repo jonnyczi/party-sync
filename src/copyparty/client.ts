@@ -8,6 +8,26 @@ import type {
 } from './types';
 import { Up2kError } from './types';
 
+/**
+ * Thrown when a request is torn down because the caller's run was cancelled (as
+ * opposed to a network timeout). Deliberate, so the engine treats it as
+ * non-retryable and doesn't record it as a per-file failure.
+ */
+export class RequestCancelledError extends Error {
+  constructor() {
+    super('request cancelled');
+    this.name = 'RequestCancelledError';
+  }
+}
+
+// Per-request network timeouts. Without these a stalled connection (one that
+// never sends a response) hangs the whole run forever, since `fetch` only
+// rejects on a transport error, never on silence. Chunk POSTs get a much
+// longer budget because they carry up to 8 MiB of body on a slow link.
+const HANDSHAKE_TIMEOUT_MS = 30_000;
+const CHUNK_TIMEOUT_MS = 120_000;
+const LS_TIMEOUT_MS = 20_000;
+
 export interface CopypartyClientOptions {
   baseUrl: string;
   password?: string;
@@ -74,13 +94,19 @@ export class CopypartyClient {
   async handshake(
     folderPath: string,
     body: HandshakeBody | (HandshakeBody & { srch: 1 }),
+    signal?: AbortSignal,
   ): Promise<HandshakeResponse | SearchResponse> {
-    const res = await this.fetchImpl(this.folderUrl(folderPath), {
-      ...this.fetchInit,
-      method: 'POST',
-      headers: this.headers({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify(body),
-    });
+    const res = await this.fetchWithTimeout(
+      this.folderUrl(folderPath),
+      {
+        ...this.fetchInit,
+        method: 'POST',
+        headers: this.headers({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify(body),
+      },
+      HANDSHAKE_TIMEOUT_MS,
+      signal,
+    );
     if (!res.ok) {
       throw new Up2kError(
         `handshake ${res.status} ${res.statusText} for ${folderPath}`,
@@ -99,6 +125,7 @@ export class CopypartyClient {
     folderPath: string,
     headers: { hash: string; wark: string; subc?: number; stat?: string },
     body: Uint8Array,
+    signal?: AbortSignal,
   ): Promise<void> {
     const h: Record<string, string> = {
       'Content-Type': 'application/octet-stream',
@@ -109,14 +136,19 @@ export class CopypartyClient {
     if (headers.subc !== undefined) h['X-Up2k-Subc'] = String(headers.subc);
     if (headers.stat) h['X-Up2k-Stat'] = headers.stat;
 
-    const res = await this.fetchImpl(this.folderUrl(folderPath), {
-      ...this.fetchInit,
-      method: 'POST',
-      headers: this.headers(h),
-      // BodyInit accepts ArrayBuffer in both DOM and Node typings; the cast
-      // satisfies stricter RN-bundled fetch types that omit Uint8Array.
-      body: body as unknown as BodyInit,
-    });
+    const res = await this.fetchWithTimeout(
+      this.folderUrl(folderPath),
+      {
+        ...this.fetchInit,
+        method: 'POST',
+        headers: this.headers(h),
+        // BodyInit accepts ArrayBuffer in both DOM and Node typings; the cast
+        // satisfies stricter RN-bundled fetch types that omit Uint8Array.
+        body: body as unknown as BodyInit,
+      },
+      CHUNK_TIMEOUT_MS,
+      signal,
+    );
     if (!res.ok) {
       throw new Up2kError(
         `chunk upload ${res.status} ${res.statusText}`,
@@ -131,12 +163,17 @@ export class CopypartyClient {
    * validate reachability, auth, and — when called against a specific remote
    * path — the user's permissions on that volume.
    */
-  async listFolder(folderPath: string): Promise<LsResponse> {
-    const res = await this.fetchImpl(`${this.folderUrl(folderPath)}?ls`, {
-      ...this.fetchInit,
-      method: 'GET',
-      headers: this.headers({}),
-    });
+  async listFolder(folderPath: string, signal?: AbortSignal): Promise<LsResponse> {
+    const res = await this.fetchWithTimeout(
+      `${this.folderUrl(folderPath)}?ls`,
+      {
+        ...this.fetchInit,
+        method: 'GET',
+        headers: this.headers({}),
+      },
+      LS_TIMEOUT_MS,
+      signal,
+    );
     if (!res.ok) {
       throw new Up2kError(
         `ls ${res.status} ${res.statusText} for ${folderPath}`,
@@ -145,6 +182,45 @@ export class CopypartyClient {
       );
     }
     return (await res.json()) as LsResponse;
+  }
+
+  /**
+   * `fetch` with a per-request timeout, and support for an external cancel
+   * signal, combined into one signal handed to the underlying fetch.
+   *
+   * Aborts are disambiguated on the way out: an external cancel throws
+   * {@link RequestCancelledError} (deliberate, non-retryable), while a timeout
+   * throws a plain error (transient, retryable by the engine's `withRetry`).
+   */
+  private async fetchWithTimeout(
+    url: string,
+    init: RequestInit,
+    timeoutMs: number,
+    externalSignal?: AbortSignal,
+  ): Promise<Response> {
+    const combined = new AbortController();
+    let timedOut = false;
+    const onExternalAbort = () => combined.abort();
+    if (externalSignal) {
+      if (externalSignal.aborted) combined.abort();
+      else externalSignal.addEventListener('abort', onExternalAbort);
+    }
+    const timer = setTimeout(() => {
+      timedOut = true;
+      combined.abort();
+    }, timeoutMs);
+    try {
+      return await this.fetchImpl(url, { ...init, signal: combined.signal });
+    } catch (e) {
+      // The external signal aborting means the user cancelled; that takes
+      // priority over a coincident timeout.
+      if (externalSignal?.aborted) throw new RequestCancelledError();
+      if (timedOut) throw new Error(`request timed out after ${timeoutMs}ms`);
+      throw e;
+    } finally {
+      clearTimeout(timer);
+      externalSignal?.removeEventListener('abort', onExternalAbort);
+    }
   }
 
   private headers(extra: Record<string, string>): Record<string, string> {

@@ -20,6 +20,7 @@ import { RemotePathBrowser } from '@/components/remote-path-browser';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { IconSymbol } from '@/components/ui/icon-symbol';
+import { statusColor } from '@/constants/status-colors';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { formatEta, formatRate, useEta } from '@/hooks/use-eta';
@@ -522,19 +523,19 @@ export default function JobEditScreen() {
                     style={({ pressed }) => [
                       styles.segmentedBtn,
                       {
-                        backgroundColor: selected ? Colors[scheme].tint : 'transparent',
-                        borderColor: Colors[scheme].icon,
+                        backgroundColor: selected ? Colors[scheme].accent : 'transparent',
+                        borderColor: selected ? Colors[scheme].accent : Colors[scheme].icon,
                         opacity: disabled ? 0.4 : pressed ? 0.7 : 1,
                       },
                     ]}>
                     <IconSymbol
                       name={kind === 'saf' ? 'folder.fill' : 'photo.on.rectangle'}
-                      color={selected ? '#fff' : Colors[scheme].tint}
+                      color={selected ? Colors[scheme].onAccent : Colors[scheme].tint}
                       size={16}
                     />
                     <ThemedText
                       style={{
-                        color: selected ? '#fff' : Colors[scheme].tint,
+                        color: selected ? Colors[scheme].onAccent : Colors[scheme].tint,
                         fontWeight: '600',
                       }}>
                       {kind === 'saf' ? 'Folder' : 'Camera roll'}
@@ -761,13 +762,13 @@ export default function JobEditScreen() {
                     styles.syncBtn,
                     {
                       backgroundColor:
-                        starting || activeRunHere ? Colors[scheme].icon : Colors[scheme].tint,
+                        starting || activeRunHere ? Colors[scheme].icon : Colors[scheme].accent,
                       opacity: pressed ? 0.85 : 1,
                     },
                   ]}>
                   <IconSymbol
                     name="arrow.up.circle.fill"
-                    color="#fff"
+                    color={Colors[scheme].onAccent}
                     size={22}
                   />
                   <ThemedText style={styles.syncBtnText}>
@@ -813,7 +814,7 @@ export default function JobEditScreen() {
                       <StatusDot status={r.status} />
                       <ThemedText style={styles.runHistoryText} numberOfLines={1}>
                         {new Date(r.started_at).toLocaleString()} · {r.status} ·{' '}
-                        {r.files_uploaded}↑ / {r.files_skipped}= / {r.files_failed}✗
+                        {r.files_uploaded} up · {r.files_skipped} skip · {r.files_failed} fail
                       </ThemedText>
                       <IconSymbol
                         name="chevron.right"
@@ -861,6 +862,7 @@ export default function JobEditScreen() {
 }
 
 function ActiveRunPanel({ run }: { run: ActiveRunSnapshot }) {
+  const scheme = useColorScheme() ?? 'light';
   const { etaMs, rateBytesPerSec } = useEta(
     run.uploadedBytes,
     run.totalBytes,
@@ -876,7 +878,9 @@ function ActiveRunPanel({ run }: { run: ActiveRunSnapshot }) {
     <View style={styles.panel}>
       <ThemedText style={styles.panelLabel}>{phaseLabel(run.phase)}</ThemedText>
       <View style={styles.progressTrack}>
-        <View style={[styles.progressFill, { width: `${pct}%` }]} />
+        <View
+          style={[styles.progressFill, { width: `${pct}%`, backgroundColor: Colors[scheme].accent }]}
+        />
       </View>
       <View style={styles.progressRow}>
         <ThemedText style={styles.muted}>
@@ -985,19 +989,8 @@ function LastRunPanel({
 }
 
 function StatusDot({ status }: { status: RunRow['status'] }) {
-  const color =
-    status === 'ok'
-      ? '#2a9d3f'
-      : status === 'partial'
-        ? '#d08900'
-        : status === 'failed'
-          ? '#c33'
-          : status === 'skipped'
-            ? '#6a8caf'
-            : status === 'cancelled'
-              ? '#6c757d'
-              : '#888';
-  return <View style={[styles.statusDot, { backgroundColor: color }]} />;
+  const scheme = useColorScheme() ?? 'light';
+  return <View style={[styles.statusDot, { backgroundColor: statusColor(status, scheme) }]} />;
 }
 
 function phaseLabel(phase: 'scanning' | 'uploading' | 'finalizing'): string {

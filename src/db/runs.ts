@@ -95,6 +95,26 @@ export async function finishRun(
 }
 
 /**
+ * Mark any run still stuck at `status='running'` as `interrupted`. The engine
+ * always finalizes a run it starts, so a lingering `running` row means the
+ * process died mid-flight (app killed, crash). Left alone it shows as a frozen
+ * "running" run forever and — because the run model is single-slot — blocks
+ * every future periodic run with `already_running`. Call once at startup,
+ * before any run begins, so it can't clobber a genuinely-active run.
+ * Returns the number of rows reconciled.
+ */
+export async function reconcileInterruptedRuns(db: SqliteDb): Promise<number> {
+  const res = await db.runAsync(
+    `UPDATE runs
+       SET status = 'interrupted',
+           finished_at = COALESCE(finished_at, ?)
+     WHERE status = 'running'`,
+    [Date.now()],
+  );
+  return res.changes;
+}
+
+/**
  * Write an instantaneous `runs` row for a periodic tick that was gated
  * by a constraint. `started_at === finished_at`, counters all zero,
  * `status='skipped'` with the reason preserved for diagnostics.

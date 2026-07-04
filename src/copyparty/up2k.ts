@@ -40,6 +40,11 @@ export interface UploadOptions {
   precomputedSize?: number;
   /** Optional progress callback after each chunk POST. */
   onProgress?: (info: { bytesUploaded: number; totalBytes: number }) => void;
+  /**
+   * Optional abort signal for the run. Threaded into every handshake/chunk POST
+   * so a cancel (or per-request timeout) tears the transfer down mid-flight.
+   */
+  signal?: AbortSignal;
 }
 
 export interface UploadResult {
@@ -143,7 +148,7 @@ export function planStitchedChunks(
  * flight — engine-level concurrency goes across files, not within them.
  */
 export async function uploadFile(opts: UploadOptions): Promise<UploadResult> {
-  const { client, fileSource, localUri, lmod, onProgress } = opts;
+  const { client, fileSource, localUri, lmod, onProgress, signal } = opts;
   const size = opts.precomputedSize ?? (await fileSource.size(localUri));
   const chunksize = up2kChunksize(size);
   const hashes =
@@ -152,12 +157,16 @@ export async function uploadFile(opts: UploadOptions): Promise<UploadResult> {
   let folder = opts.remoteFolder;
   let name = opts.name;
 
-  let response = (await client.handshake(folder, {
-    name,
-    size,
-    lmod,
-    hash: hashes,
-  })) as HandshakeResponse;
+  let response = (await client.handshake(
+    folder,
+    {
+      name,
+      size,
+      lmod,
+      hash: hashes,
+    },
+    signal,
+  )) as HandshakeResponse;
 
   if (response.purl) folder = response.purl;
   if (response.name) name = response.name;
@@ -178,17 +187,21 @@ export async function uploadFile(opts: UploadOptions): Promise<UploadResult> {
     const batches = planStitchedChunks(response.hash, hashes, chunksize, size);
     for (const batch of batches) {
       const body = await fileSource.readRange(localUri, batch.car, batch.cdr);
-      await client.uploadChunk(folder, { hash: batch.hashes.join(','), wark }, body);
+      await client.uploadChunk(folder, { hash: batch.hashes.join(','), wark }, body, signal);
       bytesUploaded += batch.cdr - batch.car;
       onProgress?.({ bytesUploaded, totalBytes: size });
     }
 
-    response = (await client.handshake(folder, {
-      name,
-      size,
-      lmod,
-      hash: hashes,
-    })) as HandshakeResponse;
+    response = (await client.handshake(
+      folder,
+      {
+        name,
+        size,
+        lmod,
+        hash: hashes,
+      },
+      signal,
+    )) as HandshakeResponse;
     if (response.purl) folder = response.purl;
     if (response.name) name = response.name;
   }

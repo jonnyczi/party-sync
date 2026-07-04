@@ -59,7 +59,11 @@ export type RunStatus =
   | 'partial'
   | 'failed'
   | 'skipped'
-  | 'cancelled';
+  | 'cancelled'
+  // Set by startup reconciliation for a run whose process died mid-flight
+  // (see reconcileInterruptedRuns in src/db/runs.ts). No CHECK constraint on
+  // runs.status, so this needs no schema migration.
+  | 'interrupted';
 export type SkipReason =
   | 'wifi_only'
   | 'data_saver'
