@@ -5,6 +5,7 @@ import {
   deleteJob,
   getJob,
   listJobsForServer,
+  MAX_CONCURRENCY,
   updateJob,
 } from '@/src/db/jobs';
 import { runMigrations } from '@/src/db/schema';
@@ -42,6 +43,40 @@ describe('jobs DAO', () => {
     expect(row?.periodic_enabled).toBe(0);
     expect(row?.periodic_minutes).toBe(60);
     expect(row?.path_organization).toBe('flat');
+    expect(row?.max_concurrency).toBe(3);
+  });
+
+  it('round-trips and clamps max_concurrency to 1–8', async () => {
+    const id = await createJob(db, {
+      server_id: serverId,
+      name: 'fast',
+      source_kind: 'saf',
+      source_uri: 'content://tree',
+      remote_path: '/r',
+      max_concurrency: 5,
+    });
+    expect((await getJob(db, id))?.max_concurrency).toBe(5);
+
+    // Out-of-range values are clamped on write.
+    await updateJob(db, id, {
+      server_id: serverId,
+      name: 'fast',
+      source_kind: 'saf',
+      source_uri: 'content://tree',
+      remote_path: '/r',
+      max_concurrency: 99,
+    });
+    expect((await getJob(db, id))?.max_concurrency).toBe(MAX_CONCURRENCY);
+
+    await updateJob(db, id, {
+      server_id: serverId,
+      name: 'fast',
+      source_kind: 'saf',
+      source_uri: 'content://tree',
+      remote_path: '/r',
+      max_concurrency: 0,
+    });
+    expect((await getJob(db, id))?.max_concurrency).toBe(1);
   });
 
   it('round-trips path_organization', async () => {

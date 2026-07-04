@@ -4,7 +4,7 @@ import { Up2kError } from '../copyparty/types';
 import { uploadFile } from '../copyparty/up2k';
 import type { SqliteDb } from '../db/adapter';
 import * as fileStateDao from '../db/file_state';
-import { getJob } from '../db/jobs';
+import { clampConcurrency, getJob } from '../db/jobs';
 import * as runsDao from '../db/runs';
 import type {
   ErrorPhase,
@@ -16,7 +16,7 @@ import type {
 
 import { dateSubdir } from './path-organization';
 import { ProgressBus } from './progress';
-import type { SourceWalker } from './walker/types';
+import type { SourceWalker, WalkerEntry } from './walker/types';
 
 // v1 retry policy — hard-coded. Applied at the HTTP call level (handshake +
 // chunk POST). Auth errors (401/403) are not retryable and bubble up as
@@ -43,6 +43,10 @@ export interface EngineOptions {
  * errors go to `run_errors` and the run continues; 401/403 fail the whole
  * run. `rehash_interval_days` is recorded on the job but not yet acted upon
  * — the re-hash path lands in phase 8 along with delete-propagation.
+ *
+ * Throughput: the run is two phases. A **scan** pass drains the walker into an
+ * array (exact `totalFiles`/`totalBytes`), then an **upload** pass runs up to
+ * `job.max_concurrency` files in parallel via a fixed-size worker pool.
  */
 export async function runJob(
   opts: EngineOptions,
@@ -61,22 +65,38 @@ export async function runJob(
   const startedAt = now();
   progress.startRun({ runId, jobId, trigger, startedAt });
 
+  // Counters shared across the worker pool. JS is single-threaded and these
+  // are only mutated synchronously between awaits, so plain `++` is race-free.
   let scanned = 0;
   let uploaded = 0;
   let skipped = 0;
   let failed = 0;
   let bytesUploaded = 0;
+  let bytesDeduped = 0;
+  // First fatal (401/403) error: stops the pool scheduling new files; in-flight
+  // uploads are allowed to settle.
   let fatal: unknown = null;
 
   try {
     progress.setPhase('scanning');
     const existing = await loadFileState(opts.db, jobId);
 
-    progress.setPhase('uploading');
+    // Scan pass: drain the walker into an array for an exact denominator.
+    // Entries are tiny (uri, path, size, mtime) so even a 50k-asset camera
+    // roll is fine in memory.
+    const entries: WalkerEntry[] = [];
+    let totalBytes = 0;
     for await (const entry of opts.walker.walk(job.source_uri)) {
-      scanned++;
-      progress.bumpCounters({ scanned: 1 });
+      entries.push(entry);
+      totalBytes += entry.size;
+    }
+    scanned = entries.length;
+    progress.bumpCounters({ scanned });
+    progress.setTotals({ totalFiles: entries.length, totalBytes });
 
+    progress.setPhase('uploading');
+
+    const processEntry = async (entry: WalkerEntry): Promise<void> => {
       const prior = existing.get(entry.localPath);
       if (
         prior &&
@@ -86,7 +106,8 @@ export async function runJob(
       ) {
         skipped++;
         progress.bumpCounters({ skipped: 1 });
-        continue;
+        progress.advanceUploaded(entry.size);
+        return;
       }
 
       const name = basename(entry.relativePath);
@@ -99,7 +120,7 @@ export async function runJob(
       const remoteFolder = joinRemote(job.remote_path, subDir);
       const lmod = Math.max(0, Math.floor(entry.mtimeMs / 1000));
 
-      progress.setActiveFile({
+      progress.startFile({
         localPath: entry.localPath,
         name,
         size: entry.size,
@@ -107,7 +128,6 @@ export async function runJob(
       });
 
       try {
-        let lastFileBytes = 0;
         const result = await uploadFile({
           client: retryingClient,
           fileSource: opts.fileSource,
@@ -117,18 +137,17 @@ export async function runJob(
           lmod,
           precomputedSize: entry.size,
           onProgress: ({ bytesUploaded: b }) => {
-            progress.updateActiveFileBytes(b);
-            const delta = b - lastFileBytes;
-            if (delta > 0) {
-              progress.bumpCounters({ bytesUploaded: delta });
-              lastFileBytes = b;
-            }
+            progress.updateFileBytes(entry.localPath, b);
           },
         });
 
         bytesUploaded += result.bytesUploaded;
+        bytesDeduped += result.dedupSavedBytes;
         uploaded++;
         progress.bumpCounters({ uploaded: 1 });
+        // Bytes the server already had never crossed the wire, so top the
+        // overall bar up to this file's full size and tally the dedup saving.
+        progress.recordDedup(result.dedupSavedBytes);
 
         await fileStateDao.upsertFileState(opts.db, {
           job_id: jobId,
@@ -154,15 +173,31 @@ export async function runJob(
         progress.recordError({ localPath: entry.localPath, phase, httpStatus, message });
 
         if (isFatalForRun(e)) {
-          fatal = e;
-          break;
+          fatal ??= e;
+        } else {
+          failed++;
+          progress.bumpCounters({ failed: 1 });
         }
-        failed++;
-        progress.bumpCounters({ failed: 1 });
       } finally {
-        progress.setActiveFile(null);
+        progress.endFile(entry.localPath);
       }
-    }
+    };
+
+    // Fixed-size worker pool: each worker pulls the next index until the array
+    // is drained or a fatal error halts scheduling. In-flight uploads finish.
+    let nextIndex = 0;
+    const poolSize = Math.max(
+      1,
+      Math.min(clampConcurrency(job.max_concurrency), entries.length),
+    );
+    const worker = async (): Promise<void> => {
+      while (!fatal) {
+        const idx = nextIndex++;
+        if (idx >= entries.length) return;
+        await processEntry(entries[idx]);
+      }
+    };
+    await Promise.all(Array.from({ length: poolSize }, () => worker()));
   } catch (e) {
     fatal = e;
     const message = e instanceof Error ? e.message : String(e);
@@ -185,6 +220,7 @@ export async function runJob(
     files_skipped: skipped,
     files_failed: failed,
     bytes_uploaded: bytesUploaded,
+    bytes_deduped: bytesDeduped,
   });
   progress.finishRun();
 

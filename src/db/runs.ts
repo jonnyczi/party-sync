@@ -19,6 +19,7 @@ export interface RunCounters {
   files_skipped?: number;
   files_failed?: number;
   bytes_uploaded?: number;
+  bytes_deduped?: number;
 }
 
 export interface FinishRunInput extends RunCounters {
@@ -48,7 +49,8 @@ export async function updateRunCounters(
        files_uploaded = COALESCE(?, files_uploaded),
        files_skipped = COALESCE(?, files_skipped),
        files_failed = COALESCE(?, files_failed),
-       bytes_uploaded = COALESCE(?, bytes_uploaded)
+       bytes_uploaded = COALESCE(?, bytes_uploaded),
+       bytes_deduped = COALESCE(?, bytes_deduped)
      WHERE id = ?`,
     [
       counters.files_scanned ?? null,
@@ -56,6 +58,7 @@ export async function updateRunCounters(
       counters.files_skipped ?? null,
       counters.files_failed ?? null,
       counters.bytes_uploaded ?? null,
+      counters.bytes_deduped ?? null,
       runId,
     ],
   );
@@ -74,7 +77,8 @@ export async function finishRun(
        files_uploaded = COALESCE(?, files_uploaded),
        files_skipped = COALESCE(?, files_skipped),
        files_failed = COALESCE(?, files_failed),
-       bytes_uploaded = COALESCE(?, bytes_uploaded)
+       bytes_uploaded = COALESCE(?, bytes_uploaded),
+       bytes_deduped = COALESCE(?, bytes_deduped)
      WHERE id = ?`,
     [
       Date.now(),
@@ -84,6 +88,7 @@ export async function finishRun(
       input.files_skipped ?? null,
       input.files_failed ?? null,
       input.bytes_uploaded ?? null,
+      input.bytes_deduped ?? null,
       runId,
     ],
   );

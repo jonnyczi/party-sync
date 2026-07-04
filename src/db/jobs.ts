@@ -1,6 +1,11 @@
 import type { SqliteDb } from './adapter';
 import type { JobRow, PathOrganization, SourceKind } from './types';
 
+/** Per-job upload concurrency bounds. Default lives in the schema (3). */
+export const MIN_CONCURRENCY = 1;
+export const MAX_CONCURRENCY = 8;
+export const DEFAULT_CONCURRENCY = 3;
+
 export interface JobInput {
   server_id: number;
   name: string;
@@ -15,10 +20,17 @@ export interface JobInput {
   rehash_interval_days?: number;
   periodic_enabled?: boolean;
   periodic_minutes?: number;
+  max_concurrency?: number;
 }
 
 function bool(v: boolean | undefined, fallback: number): number {
   return v === undefined ? fallback : v ? 1 : 0;
+}
+
+/** Clamp a concurrency value to [MIN, MAX], falling back to the default. */
+export function clampConcurrency(v: number | undefined): number {
+  if (v === undefined || !Number.isFinite(v)) return DEFAULT_CONCURRENCY;
+  return Math.max(MIN_CONCURRENCY, Math.min(MAX_CONCURRENCY, Math.round(v)));
 }
 
 export async function listJobs(db: SqliteDb): Promise<JobRow[]> {
@@ -54,9 +66,9 @@ export async function createJob(
     `INSERT INTO jobs (
        server_id, name, source_kind, source_uri, remote_path, path_organization,
        propagate_deletes, wifi_only, respect_data_saver, charging_only,
-       rehash_interval_days, periodic_enabled, periodic_minutes,
+       rehash_interval_days, periodic_enabled, periodic_minutes, max_concurrency,
        created_at, updated_at
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       input.server_id,
       input.name,
@@ -71,6 +83,7 @@ export async function createJob(
       input.rehash_interval_days ?? 30,
       bool(input.periodic_enabled, 0),
       input.periodic_minutes ?? 60,
+      clampConcurrency(input.max_concurrency),
       now,
       now,
     ],
@@ -89,6 +102,7 @@ export async function updateJob(
        path_organization = ?,
        propagate_deletes = ?, wifi_only = ?, respect_data_saver = ?, charging_only = ?,
        rehash_interval_days = ?, periodic_enabled = ?, periodic_minutes = ?,
+       max_concurrency = ?,
        updated_at = ?
      WHERE id = ?`,
     [
@@ -105,6 +119,7 @@ export async function updateJob(
       input.rehash_interval_days ?? 30,
       bool(input.periodic_enabled, 0),
       input.periodic_minutes ?? 60,
+      clampConcurrency(input.max_concurrency),
       Date.now(),
       id,
     ],

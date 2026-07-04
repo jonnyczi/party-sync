@@ -60,6 +60,7 @@ export function buildBundle(input: BuildBundleInput): BackupBundleV1 {
       rehash_interval_days: j.rehash_interval_days,
       periodic_enabled: j.periodic_enabled === 1,
       periodic_minutes: j.periodic_minutes,
+      max_concurrency: j.max_concurrency,
     };
     // Only `media` source URIs are portable (a sentinel); omit `saf` URIs.
     if (j.source_kind === 'media') job.source_uri = j.source_uri;
@@ -180,6 +181,11 @@ export function parseBundle(text: string): BackupBundleV1 {
       rehash_interval_days: asNumber(jo.rehash_interval_days, `jobs[${i}].rehash_interval_days`),
       periodic_enabled: asBool(jo.periodic_enabled, `jobs[${i}].periodic_enabled`),
       periodic_minutes: asNumber(jo.periodic_minutes, `jobs[${i}].periodic_minutes`),
+      // Pre-v4 backups predate per-job concurrency; createJob fills the default.
+      max_concurrency:
+        jo.max_concurrency === undefined
+          ? undefined
+          : asNumber(jo.max_concurrency, `jobs[${i}].max_concurrency`),
     };
     if (jo.source_uri !== undefined) {
       job.source_uri = asString(jo.source_uri, `jobs[${i}].source_uri`);

@@ -34,7 +34,7 @@ afterEach(() => db.close());
 
 describe('engine.runJob', () => {
   it('uploads a new file and records file_state + run counters', async () => {
-    // 2.5 MiB → 1 MiB chunksize (per up2kChunksize table) → 3 chunk POSTs.
+    // 2.5 MiB → 1 MiB chunksize → 3 chunks, stitched into a single POST.
     const entry = makeEntry('a.bin', 2.5 * MIB);
     const server = makeFakeServer([entry]);
 
@@ -56,7 +56,8 @@ describe('engine.runJob', () => {
     expect(run.files_uploaded).toBe(1);
     expect(run.files_failed).toBe(0);
     expect(run.bytes_uploaded).toBe(entry.size);
-    expect(server.chunkPosts).toBe(3);
+    expect(run.bytes_deduped).toBe(0);
+    expect(server.chunkPosts).toBe(1); // 3 contiguous chunks → one stitched POST
     expect(server.handshakes).toBe(2); // initial + re-handshake
 
     const fs = await db.getFirstAsync<{ wark: string; uploaded_at: number }>(
@@ -149,7 +150,10 @@ describe('engine.runJob', () => {
     expect(errs[0].http_status).toBe(500);
   });
 
-  it('fails the entire run on 401 and does not touch subsequent files', async () => {
+  it('fails the entire run on 401 and stops scheduling subsequent files', async () => {
+    // Pin concurrency to 1 so "the second file is never touched" is
+    // deterministic — with a wider pool both files would be in flight at once.
+    await db.runAsync('UPDATE jobs SET max_concurrency = 1 WHERE id = ?', [jobId]);
     const first = makeEntry('first.bin', 1000);
     const second = makeEntry('second.bin', 1000);
     const server = makeFakeServer([first, second], {
@@ -168,14 +172,15 @@ describe('engine.runJob', () => {
     );
 
     expect(run.status).toBe('failed');
-    expect(run.files_scanned).toBe(1);
+    // Both files are discovered in the pre-scan, but only the first is attempted.
+    expect(run.files_scanned).toBe(2);
     expect(run.files_uploaded).toBe(0);
     expect(run.files_failed).toBe(0);
 
     const errs = await listRunErrors(db, run.id);
     expect(errs).toHaveLength(1);
     expect(errs[0].http_status).toBe(401);
-    // 401 is not retryable — exactly one call.
+    // 401 is not retryable and halts the pool — exactly one handshake.
     expect(server.handshakes).toBe(1);
   });
 
@@ -272,6 +277,89 @@ describe('engine.runJob', () => {
     // Local subfolders are dropped in date mode.
     expect(server.handshakeUrls[0]).not.toContain('Trips');
   });
+
+  it('emits exact totalFiles and totalBytes from the pre-scan pass', async () => {
+    const entries = [
+      makeEntry('a.bin', 100),
+      makeEntry('b.bin', 250),
+      makeEntry('c.bin', 50),
+    ];
+    const server = makeFakeServer(entries);
+    const progress = new ProgressBus();
+    let seen: { totalFiles: number; totalBytes: number } | null = null;
+    progress.subscribe(() => {
+      const r = progress.getSnapshot().activeRun;
+      if (r && r.totalFiles > 0) {
+        seen = { totalFiles: r.totalFiles, totalBytes: r.totalBytes };
+      }
+    });
+
+    await runJob(
+      {
+        db,
+        walker: fakeWalker(entries),
+        client: server.client,
+        fileSource: makeFileSource(entries),
+        progress,
+        sleep: noSleep,
+      },
+      jobId,
+    );
+
+    expect(seen).toEqual({ totalFiles: 3, totalBytes: 400 });
+  });
+
+  it('uploads files in parallel but never exceeds max_concurrency in flight', async () => {
+    await db.runAsync('UPDATE jobs SET max_concurrency = 2 WHERE id = ?', [jobId]);
+    const entries = Array.from({ length: 6 }, (_, i) => makeEntry(`f${i}.bin`, 1000));
+    const server = makeFakeServer(entries);
+
+    let active = 0;
+    let maxActive = 0;
+    const base = makeFileSource(entries);
+    const fileSource: FileSource = {
+      hashFileChunks: base.hashFileChunks,
+      size: base.size,
+      async readRange(uri, car, cdr) {
+        active++;
+        maxActive = Math.max(maxActive, active);
+        await new Promise((r) => setTimeout(r, 5));
+        active--;
+        return base.readRange(uri, car, cdr);
+      },
+    };
+
+    const run = await runJob(
+      { db, walker: fakeWalker(entries), client: server.client, fileSource, sleep: noSleep },
+      jobId,
+    );
+
+    expect(run.files_uploaded).toBe(6);
+    expect(maxActive).toBeLessThanOrEqual(2);
+    expect(maxActive).toBe(2); // parallelism actually reached the cap
+  });
+
+  it('accumulates bytes_deduped for files the server already has', async () => {
+    const fresh = makeEntry('fresh.bin', 1500);
+    const dup = makeEntry('dup.bin', 2000);
+    const server = makeFakeServer([fresh, dup], { preexisting: ['dup.bin'] });
+
+    const run = await runJob(
+      {
+        db,
+        walker: fakeWalker([fresh, dup]),
+        client: server.client,
+        fileSource: makeFileSource([fresh, dup]),
+        sleep: noSleep,
+      },
+      jobId,
+    );
+
+    expect(run.status).toBe('ok');
+    expect(run.files_uploaded).toBe(2); // both "succeed"; one needed no bytes
+    expect(run.bytes_uploaded).toBe(fresh.size); // only the fresh file's bytes
+    expect(run.bytes_deduped).toBe(dup.size); // the pre-existing file was free
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -331,6 +419,8 @@ function fakeChunkHash(uri: string, index: number): string {
 interface FakeServerOptions {
   failHandshakeFor?: { name: string; status: number };
   failChunkFor?: { name: string; status: number; times: number };
+  /** Names the server already holds in full (handshake returns no missing). */
+  preexisting?: string[];
 }
 
 interface FakeServer {
@@ -376,6 +466,10 @@ function makeFakeServer(
           warkByName.set(body.name, wark);
           serverSeen.set(wark, new Set());
           warkNameMap.set(wark, body.name);
+          // A pre-existing file already has every chunk on the server.
+          if (opts.preexisting?.includes(body.name)) {
+            for (const h of body.hash) serverSeen.get(wark)!.add(h);
+          }
         }
         const seen = serverSeen.get(wark)!;
         const missing = body.hash.filter((h) => !seen.has(h));
@@ -398,8 +492,9 @@ function makeFakeServer(
         chunkFailuresLeft--;
         return new Response('', { status: opts.failChunkFor.status });
       }
-      const hash = headers['x-up2k-hash'];
-      serverSeen.get(wark)?.add(hash);
+      // A stitched POST carries several comma-joined chunk hashes; record each.
+      const stitched = headers['x-up2k-hash'].split(',');
+      for (const h of stitched) serverSeen.get(wark)?.add(h);
       return new Response('', { status: 200 });
     },
   );

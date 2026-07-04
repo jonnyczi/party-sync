@@ -21,10 +21,19 @@ import { ThemedView } from '@/components/themed-view';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { formatEta, formatRate, useEta } from '@/hooks/use-eta';
 import { useSyncProgress } from '@/hooks/use-sync-progress';
 import { normalizeRemotePath } from '@/src/copyparty/paths';
 import { testJobConnection } from '@/src/copyparty/test-connection';
-import { createJob, deleteJob, getJob, updateJob } from '@/src/db/jobs';
+import {
+  createJob,
+  DEFAULT_CONCURRENCY,
+  deleteJob,
+  getJob,
+  MAX_CONCURRENCY,
+  MIN_CONCURRENCY,
+  updateJob,
+} from '@/src/db/jobs';
 import {
   getLatestRunForJob,
   listRunErrors,
@@ -99,6 +108,7 @@ export default function JobEditScreen() {
   const [wifiOnly, setWifiOnly] = useState(true);
   const [respectDataSaver, setRespectDataSaver] = useState(true);
   const [chargingOnly, setChargingOnly] = useState(false);
+  const [maxConcurrency, setMaxConcurrency] = useState(DEFAULT_CONCURRENCY);
   const [loaded, setLoaded] = useState(isNew);
   const [saving, setSaving] = useState(false);
   // `starting` covers the gap between tapping Sync-now and the engine
@@ -138,6 +148,7 @@ export default function JobEditScreen() {
       setWifiOnly(row.wifi_only === 1);
       setRespectDataSaver(row.respect_data_saver === 1);
       setChargingOnly(row.charging_only === 1);
+      setMaxConcurrency(row.max_concurrency);
       setLoaded(true);
     });
   }, [db, isNew, jobId, router]);
@@ -215,6 +226,7 @@ export default function JobEditScreen() {
       wifi_only: wifiOnly,
       respect_data_saver: respectDataSaver,
       charging_only: chargingOnly,
+      max_concurrency: maxConcurrency,
     };
     try {
       if (isNew) {
@@ -615,6 +627,20 @@ export default function JobEditScreen() {
             </ThemedText>
           </Field>
 
+          <Field label="Parallel uploads">
+            <Stepper
+              value={maxConcurrency}
+              min={MIN_CONCURRENCY}
+              max={MAX_CONCURRENCY}
+              onChange={setMaxConcurrency}
+              unit={maxConcurrency === 1 ? 'file at a time' : 'files at a time'}
+            />
+            <ThemedText style={styles.hint}>
+              How many files upload at once. Higher fills a fast Wi-Fi link; lower
+              is gentler on older phones and slow servers.
+            </ThemedText>
+          </Field>
+
           <SchedulePanel
             enabled={periodicEnabled}
             onToggleEnabled={onTogglePeriodic}
@@ -742,29 +768,63 @@ export default function JobEditScreen() {
 }
 
 function ActiveRunPanel({ run }: { run: ActiveRunSnapshot }) {
-  const file = run.activeFile;
+  const { etaMs, rateBytesPerSec } = useEta(
+    run.uploadedBytes,
+    run.totalBytes,
+    run.startedAt,
+  );
   const pct =
-    file && file.size > 0
-      ? Math.min(100, Math.round((file.bytesUploaded / file.size) * 100))
+    run.totalBytes > 0
+      ? Math.min(100, Math.round((run.uploadedBytes / run.totalBytes) * 100))
       : 0;
+  const eta = formatEta(etaMs);
+  const rate = formatRate(rateBytesPerSec);
   return (
     <View style={styles.panel}>
       <ThemedText style={styles.panelLabel}>{phaseLabel(run.phase)}</ThemedText>
-      {file ? (
-        <>
-          <ThemedText numberOfLines={1}>{file.name}</ThemedText>
-          <View style={styles.progressTrack}>
-            <View style={[styles.progressFill, { width: `${pct}%` }]} />
-          </View>
-          <ThemedText style={styles.muted}>
-            {formatBytes(file.bytesUploaded)} / {formatBytes(file.size)} ({pct}%)
-          </ThemedText>
-        </>
+      <View style={styles.progressTrack}>
+        <View style={[styles.progressFill, { width: `${pct}%` }]} />
+      </View>
+      <View style={styles.progressRow}>
+        <ThemedText style={styles.muted}>
+          {formatBytes(run.uploadedBytes)} / {formatBytes(run.totalBytes)} ({pct}%)
+        </ThemedText>
+        <ThemedText style={styles.muted}>
+          {[rate, eta].filter(Boolean).join(' · ')}
+        </ThemedText>
+      </View>
+      {run.activeFiles.length > 0 ? (
+        <View style={{ gap: 2 }}>
+          {run.activeFiles.slice(0, 5).map((f) => {
+            const fpct =
+              f.size > 0
+                ? Math.min(100, Math.round((f.bytesUploaded / f.size) * 100))
+                : 0;
+            return (
+              <View key={f.localPath} style={styles.fileRow}>
+                <ThemedText numberOfLines={1} style={styles.fileName}>
+                  {f.name}
+                </ThemedText>
+                <ThemedText style={styles.filePct}>{fpct}%</ThemedText>
+              </View>
+            );
+          })}
+          {run.activeFiles.length > 5 ? (
+            <ThemedText style={styles.muted}>
+              +{run.activeFiles.length - 5} more uploading…
+            </ThemedText>
+          ) : null}
+        </View>
       ) : null}
       <ThemedText style={styles.muted}>
         {run.counters.uploaded} uploaded · {run.counters.skipped} skipped ·{' '}
         {run.counters.failed} failed
       </ThemedText>
+      {run.dedupedBytes > 0 ? (
+        <ThemedText style={styles.dedupText}>
+          saved {formatBytes(run.dedupedBytes)} via dedup
+        </ThemedText>
+      ) : null}
       {run.errors.length > 0 ? (
         <View style={{ marginTop: 6, gap: 2 }}>
           {run.errors.slice(-3).map((e, i) => (
@@ -971,6 +1031,61 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
+function Stepper({
+  value,
+  min,
+  max,
+  onChange,
+  unit,
+}: {
+  value: number;
+  min: number;
+  max: number;
+  onChange: (v: number) => void;
+  unit: string;
+}) {
+  const scheme = useColorScheme() ?? 'light';
+  const atMin = value <= min;
+  const atMax = value >= max;
+  const btnStyle = (disabled: boolean) => ({ pressed }: { pressed: boolean }) => [
+    styles.stepperBtn,
+    {
+      borderColor: disabled ? Colors[scheme].icon : Colors[scheme].tint,
+      opacity: disabled ? 0.4 : pressed ? 0.6 : 1,
+    },
+  ];
+  return (
+    <View style={styles.stepperRow}>
+      <Pressable
+        onPress={() => onChange(Math.max(min, value - 1))}
+        disabled={atMin}
+        hitSlop={6}
+        accessibilityLabel="Fewer parallel uploads"
+        style={btnStyle(atMin)}>
+        <ThemedText style={[styles.stepperGlyph, { color: Colors[scheme].tint }]}>
+          −
+        </ThemedText>
+      </Pressable>
+      <View style={styles.stepperValueWrap}>
+        <ThemedText type="defaultSemiBold" style={styles.stepperValue}>
+          {value}
+        </ThemedText>
+        <ThemedText style={styles.hint}>{unit}</ThemedText>
+      </View>
+      <Pressable
+        onPress={() => onChange(Math.min(max, value + 1))}
+        disabled={atMax}
+        hitSlop={6}
+        accessibilityLabel="More parallel uploads"
+        style={btnStyle(atMax)}>
+        <ThemedText style={[styles.stepperGlyph, { color: Colors[scheme].tint }]}>
+          +
+        </ThemedText>
+      </Pressable>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   container: { flex: 1 },
   centered: { alignItems: 'center', justifyContent: 'center' },
@@ -1054,6 +1169,16 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   progressFill: { height: '100%', backgroundColor: '#2a9d3f' },
+  progressRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 8,
+  },
+  fileRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  fileName: { flex: 1, fontSize: 12, opacity: 0.85 },
+  filePct: { fontSize: 12, opacity: 0.7, fontVariant: ['tabular-nums'] },
+  dedupText: { fontSize: 12, color: '#2a9d3f' },
   muted: { opacity: 0.7, fontSize: 12 },
   runLine: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   statusDot: { width: 8, height: 8, borderRadius: 4 },
@@ -1094,4 +1219,16 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     paddingHorizontal: 8,
   },
+  stepperRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  stepperBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stepperGlyph: { fontSize: 24, lineHeight: 28, fontWeight: '600' },
+  stepperValueWrap: { flex: 1, alignItems: 'center' },
+  stepperValue: { fontSize: 22, lineHeight: 26 },
 });

@@ -113,6 +113,7 @@ export async function importBundle(
       rehash_interval_days: j.rehash_interval_days,
       periodic_enabled: j.periodic_enabled,
       periodic_minutes: j.periodic_minutes,
+      max_concurrency: j.max_concurrency,
     });
     jobKeys.add(key);
     summary.jobsAdded++;

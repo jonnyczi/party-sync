@@ -7,7 +7,6 @@ export interface RunCountersSnapshot {
   uploaded: number;
   skipped: number;
   failed: number;
-  bytesUploaded: number;
 }
 
 export interface ActiveFileSnapshot {
@@ -30,8 +29,22 @@ export interface ActiveRunSnapshot {
   trigger: RunTrigger;
   startedAt: number;
   phase: RunPhase;
+  /** Exact file count from the pre-scan pass (0 until `setTotals`). */
+  totalFiles: number;
+  /** Exact byte total from the pre-scan pass (0 until `setTotals`). */
+  totalBytes: number;
+  /**
+   * Overall progress-bar numerator: bytes "accounted for" so far — actually
+   * uploaded over the wire (via `updateFileBytes`) plus deduped (`recordDedup`)
+   * and skipped (`advanceUploaded`) bytes. Reaches `totalBytes` when every file
+   * has been processed, so a re-run of an already-synced job still fills the bar.
+   */
+  uploadedBytes: number;
+  /** Live tally of bytes the server already had (the "saved via dedup" stat). */
+  dedupedBytes: number;
   counters: RunCountersSnapshot;
-  activeFile: ActiveFileSnapshot | null;
+  /** Files currently in flight, keyed by `localPath`. */
+  activeFiles: ActiveFileSnapshot[];
   errors: RunErrorSnapshot[];
 }
 
@@ -46,7 +59,6 @@ const emptyCounters = (): RunCountersSnapshot => ({
   uploaded: 0,
   skipped: 0,
   failed: 0,
-  bytesUploaded: 0,
 });
 
 /**
@@ -56,7 +68,9 @@ const emptyCounters = (): RunCountersSnapshot => ({
  * re-render on every mutation.
  *
  * Snapshots are immutable — every mutator creates a fresh top-level object so
- * referential equality checks in React do the right thing.
+ * referential equality checks in React do the right thing. Under per-job
+ * concurrency several files upload at once, so the active file is a list
+ * (`activeFiles`) keyed by `localPath`.
  */
 export class ProgressBus {
   private listeners = new Set<Listener>();
@@ -84,8 +98,12 @@ export class ProgressBus {
         trigger: input.trigger,
         startedAt: input.startedAt,
         phase: 'scanning',
+        totalFiles: 0,
+        totalBytes: 0,
+        uploadedBytes: 0,
+        dedupedBytes: 0,
         counters: emptyCounters(),
-        activeFile: null,
+        activeFiles: [],
         errors: [],
       },
     });
@@ -95,16 +113,80 @@ export class ProgressBus {
     this.withActive((run) => ({ ...run, phase }));
   }
 
-  setActiveFile(file: ActiveFileSnapshot | null): void {
-    this.withActive((run) => ({ ...run, activeFile: file }));
+  /** Record the exact totals from the pre-scan pass. */
+  setTotals(input: { totalFiles: number; totalBytes: number }): void {
+    this.withActive((run) => ({
+      ...run,
+      totalFiles: input.totalFiles,
+      totalBytes: input.totalBytes,
+    }));
   }
 
-  updateActiveFileBytes(bytesUploaded: number): void {
+  /** Add a file to the in-flight set (replacing any prior entry for its path). */
+  startFile(file: ActiveFileSnapshot): void {
+    this.withActive((run) => ({
+      ...run,
+      activeFiles: [
+        ...run.activeFiles.filter((f) => f.localPath !== file.localPath),
+        file,
+      ],
+    }));
+  }
+
+  /**
+   * Update an in-flight file's uploaded byte count. The positive delta versus
+   * its previous value advances the run-level `uploadedBytes`. No-op if the
+   * file is no longer in flight (a late progress callback after `endFile`).
+   */
+  updateFileBytes(localPath: string, bytesUploaded: number): void {
     const run = this.snapshot.activeRun;
-    if (!run?.activeFile) return;
+    if (!run) return;
+    const file = run.activeFiles.find((f) => f.localPath === localPath);
+    if (!file) return;
+    const delta = bytesUploaded - file.bytesUploaded;
     this.mutate({
-      activeRun: { ...run, activeFile: { ...run.activeFile, bytesUploaded } },
+      activeRun: {
+        ...run,
+        uploadedBytes: run.uploadedBytes + delta,
+        activeFiles: run.activeFiles.map((f) =>
+          f.localPath === localPath ? { ...f, bytesUploaded } : f,
+        ),
+      },
     });
+  }
+
+  /** Remove a file from the in-flight set. Leaves `uploadedBytes` unchanged. */
+  endFile(localPath: string): void {
+    this.withActive((run) => ({
+      ...run,
+      activeFiles: run.activeFiles.filter((f) => f.localPath !== localPath),
+    }));
+  }
+
+  /**
+   * Advance the overall `uploadedBytes` by bytes that never crossed the wire
+   * as chunk POSTs but are nonetheless "done" — the full size of a skipped
+   * (size+mtime match) file — so the progress bar still completes.
+   */
+  advanceUploaded(delta: number): void {
+    if (delta <= 0) return;
+    this.withActive((run) => ({
+      ...run,
+      uploadedBytes: run.uploadedBytes + delta,
+    }));
+  }
+
+  /**
+   * Record bytes the server already had (dedup): advances the overall bar AND
+   * the live `dedupedBytes` tally shown as "saved via dedup".
+   */
+  recordDedup(delta: number): void {
+    if (delta <= 0) return;
+    this.withActive((run) => ({
+      ...run,
+      uploadedBytes: run.uploadedBytes + delta,
+      dedupedBytes: run.dedupedBytes + delta,
+    }));
   }
 
   bumpCounters(delta: Partial<RunCountersSnapshot>): void {
@@ -115,8 +197,6 @@ export class ProgressBus {
         uploaded: run.counters.uploaded + (delta.uploaded ?? 0),
         skipped: run.counters.skipped + (delta.skipped ?? 0),
         failed: run.counters.failed + (delta.failed ?? 0),
-        bytesUploaded:
-          run.counters.bytesUploaded + (delta.bytesUploaded ?? 0),
       },
     }));
   }

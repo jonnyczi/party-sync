@@ -82,6 +82,25 @@ describe('runMigrations', () => {
     expect(jobCols.map((c) => c.name)).toContain('path_organization');
   });
 
+  it('migration v4 adds max_concurrency to jobs and bytes_deduped to runs', async () => {
+    await runMigrations(db);
+    const jobCols = await db.getAllAsync<{ name: string; dflt_value: unknown }>(
+      "PRAGMA table_info('jobs')",
+      [],
+    );
+    const concCol = jobCols.find((c) => c.name === 'max_concurrency');
+    expect(concCol).toBeTruthy();
+    expect(Number(concCol!.dflt_value)).toBe(3);
+
+    const runCols = await db.getAllAsync<{ name: string; dflt_value: unknown }>(
+      "PRAGMA table_info('runs')",
+      [],
+    );
+    const dedupCol = runCols.find((c) => c.name === 'bytes_deduped');
+    expect(dedupCol).toBeTruthy();
+    expect(Number(dedupCol!.dflt_value)).toBe(0);
+  });
+
   it('enables foreign key enforcement', async () => {
     await runMigrations(db);
     const row = await db.getFirstAsync<{ foreign_keys: number }>(

@@ -38,6 +38,7 @@ function job(over: Partial<JobRow> = {}): JobRow {
     rehash_interval_days: 30,
     periodic_enabled: 1,
     periodic_minutes: 90,
+    max_concurrency: 3,
     created_at: 1,
     updated_at: 1,
     ...over,

@@ -21,17 +21,19 @@ export function SyncBanner() {
   const run = snap.activeRun;
   if (!run) return null;
 
-  const file = run.activeFile;
   const pct =
-    file && file.size > 0 ? Math.min(100, Math.round((file.bytesUploaded / file.size) * 100)) : 0;
+    run.totalBytes > 0
+      ? Math.min(100, Math.round((run.uploadedBytes / run.totalBytes) * 100))
+      : 0;
+  const inFlight = run.activeFiles.length;
 
   const label =
     run.phase === 'scanning'
       ? 'Scanning…'
       : run.phase === 'finalizing'
         ? 'Finalizing…'
-        : file
-          ? `${file.name} · ${pct}%`
+        : inFlight > 0
+          ? `${inFlight} file${inFlight === 1 ? '' : 's'} · ${pct}%`
           : 'Syncing…';
 
   return (

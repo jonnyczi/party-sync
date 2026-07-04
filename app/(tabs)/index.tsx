@@ -8,6 +8,7 @@ import { ThemedView } from '@/components/themed-view';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { formatEta, formatRate, useEta } from '@/hooks/use-eta';
 import { useSyncProgress } from '@/hooks/use-sync-progress';
 import { listJobs } from '@/src/db/jobs';
 import {
@@ -210,10 +211,14 @@ function ActiveRunCard({
   onOpen: () => void;
 }) {
   const scheme = useColorScheme() ?? 'light';
-  const file = run.activeFile;
+  const { etaMs, rateBytesPerSec } = useEta(
+    run.uploadedBytes,
+    run.totalBytes,
+    run.startedAt,
+  );
   const pct =
-    file && file.size > 0
-      ? Math.min(100, Math.round((file.bytesUploaded / file.size) * 100))
+    run.totalBytes > 0
+      ? Math.min(100, Math.round((run.uploadedBytes / run.totalBytes) * 100))
       : 0;
   const label =
     run.phase === 'scanning'
@@ -221,6 +226,8 @@ function ActiveRunCard({
       : run.phase === 'finalizing'
         ? 'Finalizing…'
         : 'Uploading';
+  const eta = formatEta(etaMs);
+  const rate = formatRate(rateBytesPerSec);
   return (
     <Pressable
       onPress={onOpen}
@@ -240,28 +247,54 @@ function ActiveRunCard({
         </ThemedText>
         <ThemedText style={styles.heroPhase}>{label}</ThemedText>
       </View>
-      {file ? (
-        <>
-          <ThemedText numberOfLines={1} style={styles.heroFile}>
-            {file.name}
-          </ThemedText>
-          <View style={styles.progressTrack}>
-            <View
-              style={[
-                styles.progressFill,
-                { width: `${pct}%`, backgroundColor: Colors[scheme].tint },
-              ]}
-            />
-          </View>
-          <ThemedText style={styles.heroMuted}>
-            {formatBytes(file.bytesUploaded)} / {formatBytes(file.size)} ({pct}%)
-          </ThemedText>
-        </>
+      <View style={styles.progressTrack}>
+        <View
+          style={[
+            styles.progressFill,
+            { width: `${pct}%`, backgroundColor: Colors[scheme].tint },
+          ]}
+        />
+      </View>
+      <View style={styles.heroProgressRow}>
+        <ThemedText style={styles.heroMuted}>
+          {formatBytes(run.uploadedBytes)} / {formatBytes(run.totalBytes)} ({pct}%)
+        </ThemedText>
+        <ThemedText style={styles.heroMuted}>
+          {[rate, eta].filter(Boolean).join(' · ')}
+        </ThemedText>
+      </View>
+      {run.activeFiles.length > 0 ? (
+        <View style={styles.heroFiles}>
+          {run.activeFiles.slice(0, 4).map((f) => {
+            const fpct =
+              f.size > 0
+                ? Math.min(100, Math.round((f.bytesUploaded / f.size) * 100))
+                : 0;
+            return (
+              <View key={f.localPath} style={styles.heroFileRow}>
+                <ThemedText numberOfLines={1} style={styles.heroFileName}>
+                  {f.name}
+                </ThemedText>
+                <ThemedText style={styles.heroFilePct}>{fpct}%</ThemedText>
+              </View>
+            );
+          })}
+          {run.activeFiles.length > 4 ? (
+            <ThemedText style={styles.heroMuted}>
+              +{run.activeFiles.length - 4} more uploading…
+            </ThemedText>
+          ) : null}
+        </View>
       ) : null}
       <ThemedText style={styles.heroMuted}>
         {run.counters.uploaded} uploaded · {run.counters.skipped} skipped ·{' '}
         {run.counters.failed} failed
       </ThemedText>
+      {run.dedupedBytes > 0 ? (
+        <ThemedText style={styles.heroDedup}>
+          saved {formatBytes(run.dedupedBytes)} via dedup
+        </ThemedText>
+      ) : null}
       {run.errors.length > 0 ? (
         <View style={{ marginTop: 4, gap: 2 }}>
           {run.errors.slice(-3).map((e, i) => (
@@ -517,8 +550,18 @@ const styles = StyleSheet.create({
   },
   heroHeader: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   heroPhase: { fontSize: 12, opacity: 0.7, textTransform: 'capitalize' },
-  heroFile: { fontSize: 13 },
   heroMuted: { fontSize: 12, opacity: 0.7 },
+  heroProgressRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 8,
+  },
+  heroFiles: { marginTop: 2, gap: 2 },
+  heroFileRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  heroFileName: { flex: 1, fontSize: 12, opacity: 0.85 },
+  heroFilePct: { fontSize: 12, opacity: 0.7, fontVariant: ['tabular-nums'] },
+  heroDedup: { fontSize: 12, color: '#2a9d3f' },
   heroError: { fontSize: 11, color: '#c33' },
   progressTrack: {
     height: 6,

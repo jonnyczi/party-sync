@@ -116,6 +116,11 @@ export default function RunDetailScreen() {
             <ThemedText style={styles.bytesLine}>
               {formatBytes(run.bytes_uploaded)} uploaded
             </ThemedText>
+            {run.bytes_deduped > 0 ? (
+              <ThemedText style={styles.dedupLine}>
+                {formatBytes(run.bytes_deduped)} saved via dedup
+              </ThemedText>
+            ) : null}
 
             <Pressable
               onPress={() => router.push(`/job/${job.id}`)}
@@ -237,6 +242,7 @@ const styles = StyleSheet.create({
   statValue: { fontSize: 22, lineHeight: 26 },
   statLabel: { fontSize: 11, opacity: 0.7, marginTop: 2 },
   bytesLine: { opacity: 0.8, marginTop: 4 },
+  dedupLine: { color: '#2a9d3f', fontSize: 13, marginTop: 2 },
   openJobBtn: {
     flexDirection: 'row',
     alignItems: 'center',

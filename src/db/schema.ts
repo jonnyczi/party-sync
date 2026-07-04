@@ -93,6 +93,13 @@ const MIGRATIONS: Migration[] = [
         CHECK (path_organization IN ('flat','year','year_month','year_month_day'));
     `,
   },
+  {
+    version: 4,
+    up: `
+      ALTER TABLE jobs ADD COLUMN max_concurrency INTEGER NOT NULL DEFAULT 3;
+      ALTER TABLE runs ADD COLUMN bytes_deduped INTEGER NOT NULL DEFAULT 0;
+    `,
+  },
 ];
 
 /**

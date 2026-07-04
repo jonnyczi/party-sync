@@ -32,6 +32,8 @@ export interface JobRow {
   rehash_interval_days: number;
   periodic_enabled: number;
   periodic_minutes: number;
+  /** Max files uploaded in parallel for this job (clamped 1–8; default 3). */
+  max_concurrency: number;
   created_at: number;
   updated_at: number;
 }
@@ -67,6 +69,8 @@ export interface RunRow {
   files_skipped: number;
   files_failed: number;
   bytes_uploaded: number;
+  /** Bytes the server already had (dedup) and we therefore skipped sending. */
+  bytes_deduped: number;
   skip_reason: string | null;
 }
 

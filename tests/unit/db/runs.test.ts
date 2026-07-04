@@ -48,6 +48,19 @@ describe('runs DAO', () => {
     expect(row?.finished_at).toBeNull();
     expect(row?.files_scanned).toBe(0);
     expect(row?.bytes_uploaded).toBe(0);
+    expect(row?.bytes_deduped).toBe(0);
+  });
+
+  it('finishRun persists bytes_deduped', async () => {
+    const runId = await startRun(db, { job_id: jobId, trigger: 'manual' });
+    await finishRun(db, runId, {
+      status: 'ok',
+      bytes_uploaded: 1000,
+      bytes_deduped: 4096,
+    });
+    const row = await getRun(db, runId);
+    expect(row?.bytes_uploaded).toBe(1000);
+    expect(row?.bytes_deduped).toBe(4096);
   });
 
   it('updateRunCounters only touches provided fields', async () => {

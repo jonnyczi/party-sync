@@ -39,6 +39,8 @@ export interface BackupJob {
   rehash_interval_days: number;
   periodic_enabled: boolean;
   periodic_minutes: number;
+  /** Optional for backward compat with pre-v4 backups; defaults on import. */
+  max_concurrency?: number;
 }
 
 export interface BackupBundleV1 {

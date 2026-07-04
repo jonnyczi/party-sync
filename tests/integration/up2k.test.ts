@@ -101,6 +101,39 @@ describe('uploadFile against copyparty', () => {
     });
   });
 
+  it('stitches many chunks across multiple POSTs and round-trips intact', async () => {
+    requireServer();
+    await withTempDir(async (dir) => {
+      const path = join(dir, 'stitch.bin');
+      // 12 MiB → 12 chunks @ 1 MiB. The 8-chunk stitch cap splits this into
+      // an 8-chunk POST + a 4-chunk POST, exercising multi-batch stitching
+      // against the real server. The sha256 round-trip proves the comma-joined
+      // body was assembled in the right order.
+      const size = 12 * MIB;
+      await writeRandomFile(path, size, 53);
+      expect(up2kChunksize(size)).toBe(1 * MIB);
+
+      const folder = uniqueRemoteFolder('stitch');
+      const client = new CopypartyClient({ baseUrl: COPYPARTY_URL, password: COPYPARTY_PW });
+
+      const result = await uploadFile({
+        client,
+        fileSource: nodeFileSource,
+        localUri: path,
+        name: 'stitch.bin',
+        remoteFolder: folder,
+        lmod: Math.floor(Date.now() / 1000),
+      });
+
+      expect(result.alreadyExisted).toBe(false);
+      expect(result.bytesUploaded).toBe(size);
+      expect(result.dedupSavedBytes).toBe(0);
+
+      const downloaded = await downloadFile(folder, result.name);
+      expect(sha256(downloaded)).toBe(sha256(await readFile(path)));
+    });
+  });
+
   it('detects dedup on a second upload of the same file', async () => {
     requireServer();
     await withTempDir(async (dir) => {
@@ -121,6 +154,7 @@ describe('uploadFile against copyparty', () => {
         lmod,
       });
       expect(first.alreadyExisted).toBe(false);
+      expect(first.dedupSavedBytes).toBe(0); // nothing was on the server yet
 
       const second = await uploadFile({
         client,
@@ -132,6 +166,7 @@ describe('uploadFile against copyparty', () => {
       });
       expect(second.alreadyExisted).toBe(true);
       expect(second.bytesUploaded).toBe(0);
+      expect(second.dedupSavedBytes).toBe(size); // the whole file was deduped
       expect(second.wark).toBe(first.wark);
     });
   });
