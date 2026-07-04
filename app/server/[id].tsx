@@ -144,6 +144,7 @@ export default function ServerEditScreen() {
       await testServerConnection({
         baseUrl: normalizeBaseUrl(baseUrl),
         password: pw,
+        username: username.trim() || undefined,
         certSha256: certSha.trim() ? normalizeFingerprint(certSha) : null,
       });
       Alert.alert('Connection OK', 'Server responded and auth was accepted.');

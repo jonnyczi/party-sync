@@ -91,6 +91,7 @@ export default function JobEditScreen() {
   const [browserConn, setBrowserConn] = useState<{
     baseUrl: string;
     password?: string;
+    username?: string;
   } | null>(null);
   const [periodicEnabled, setPeriodicEnabled] = useState(false);
   const [periodicMinutes, setPeriodicMinutes] = useState(60);
@@ -175,7 +176,11 @@ export default function JobEditScreen() {
     const server = servers.find((s) => s.id === serverId);
     if (!server) return;
     const pw = (await getServerPassword(serverId)) ?? undefined;
-    setBrowserConn({ baseUrl: server.base_url, password: pw });
+    setBrowserConn({
+      baseUrl: server.base_url,
+      password: pw,
+      username: server.username ?? undefined,
+    });
     setBrowserVisible(true);
   };
 
@@ -317,6 +322,7 @@ export default function JobEditScreen() {
       const result = await testJobConnection({
         baseUrl: server.base_url,
         password: pw,
+        username: server.username ?? undefined,
         certSha256: server.cert_sha256,
         remotePath: remote,
         sourceKind,
@@ -724,6 +730,7 @@ export default function JobEditScreen() {
             visible={browserVisible}
             baseUrl={browserConn.baseUrl}
             password={browserConn.password}
+            username={browserConn.username}
             initialPath={normalizeRemotePath(remotePath) || '/'}
             onClose={() => setBrowserVisible(false)}
             onSelect={setRemotePath}

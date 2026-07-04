@@ -99,6 +99,7 @@ async function runPeriodicJob(db: SqliteDb, job: JobRow): Promise<void> {
   const client = new CopypartyClient({
     baseUrl: server.base_url,
     password: password ?? undefined,
+    username: server.username ?? undefined,
   });
 
   await withForegroundService(job.name, () =>

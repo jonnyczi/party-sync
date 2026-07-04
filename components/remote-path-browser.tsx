@@ -22,6 +22,8 @@ type Props = {
   visible: boolean;
   baseUrl: string;
   password?: string;
+  /** Account name, forwarded to browseFolder so `--usernames` servers authenticate. */
+  username?: string;
   /** Folder the browser opens on; falls back to root if it can't be listed. */
   initialPath: string;
   onClose: () => void;
@@ -38,6 +40,7 @@ export function RemotePathBrowser({
   visible,
   baseUrl,
   password,
+  username,
   initialPath,
   onClose,
   onSelect,
@@ -55,7 +58,7 @@ export function RemotePathBrowser({
       setLoading(true);
       setError(null);
       try {
-        const res = await browseFolder({ baseUrl, password, path: p });
+        const res = await browseFolder({ baseUrl, password, username, path: p });
         setPath(p);
         setDirs(res.dirs);
         setWritable(res.writable);
@@ -74,7 +77,7 @@ export function RemotePathBrowser({
         setLoading(false);
       }
     },
-    [baseUrl, password],
+    [baseUrl, password, username],
   );
 
   // Re-list from the initial path each time the browser opens. Intentionally

@@ -35,6 +35,8 @@ export class TestConnectionError extends Error {
 export interface TestServerOptions {
   baseUrl: string;
   password: string;
+  /** Account name, sent as `PW: username:password` when set (see CopypartyClient). */
+  username?: string | null;
   certSha256?: string | null;
 }
 
@@ -50,6 +52,7 @@ export async function testServerConnection(opts: TestServerOptions): Promise<voi
   const client = new CopypartyClient({
     baseUrl: opts.baseUrl,
     password: opts.password,
+    username: opts.username ?? undefined,
   });
   let resp;
   try {
@@ -74,6 +77,7 @@ export async function testJobConnection(
   const client = new CopypartyClient({
     baseUrl: opts.baseUrl,
     password: opts.password,
+    username: opts.username ?? undefined,
   });
   let resp;
   try {

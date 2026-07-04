@@ -37,6 +37,7 @@ export async function runJobManual(
   const client = new CopypartyClient({
     baseUrl: server.base_url,
     password: password ?? undefined,
+    username: server.username ?? undefined,
   });
 
   return withForegroundService(job.name, () =>

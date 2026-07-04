@@ -9,6 +9,12 @@ import { Up2kError } from './types';
 export interface CopypartyClientOptions {
   baseUrl: string;
   password?: string;
+  /**
+   * Optional account name. When set, the `PW` header carries `username:password`
+   * so the server can disambiguate the account — required when copyparty is run
+   * with `--usernames`. See {@link CopypartyClient.headers}.
+   */
+  username?: string;
   /** Extra fetch init merged into every request (e.g. for self-signed cert agents in Node tests). */
   fetchInit?: RequestInit;
   /** Fetch implementation. Defaults to globalThis.fetch. */
@@ -18,8 +24,13 @@ export interface CopypartyClientOptions {
 /**
  * Thin HTTP wrapper around copyparty's up2k endpoints.
  *
- * Auth: copyparty accepts the password in several forms; we send it via the
- * `PW` request header (see initial-plan.md "Auth"). One password per server.
+ * Auth: copyparty accepts the password via the `PW` request header (see
+ * initial-plan.md "Auth"). By default copyparty matches the account from the
+ * password alone and ignores any username. But when the server is started with
+ * `--usernames`, the credential must be `username:password` — a bare password
+ * is rejected. So when a `username` is configured we send `PW: user:pass`,
+ * which copyparty also accepts on non-`--usernames` servers (it just finds the
+ * password component), keeping this format safe for every server.
  *
  * URL handling: every request takes a `folderPath` (e.g. `/phone-backups/`)
  * which is joined to `baseUrl`. The trailing slash is required by copyparty
@@ -28,12 +39,16 @@ export interface CopypartyClientOptions {
 export class CopypartyClient {
   private readonly baseUrl: string;
   private readonly password?: string;
+  private readonly username?: string;
   private readonly fetchImpl: typeof fetch;
   private readonly fetchInit: RequestInit;
 
   constructor(opts: CopypartyClientOptions) {
     this.baseUrl = opts.baseUrl.replace(/\/+$/, '');
     this.password = opts.password;
+    // Empty/whitespace usernames collapse to undefined so we never emit a
+    // leading-colon `PW: :pass`, which copyparty would read as an empty user.
+    this.username = opts.username?.trim() || undefined;
     this.fetchImpl = opts.fetch ?? globalThis.fetch.bind(globalThis);
     this.fetchInit = opts.fetchInit ?? {};
   }
@@ -128,7 +143,11 @@ export class CopypartyClient {
 
   private headers(extra: Record<string, string>): Record<string, string> {
     const h: Record<string, string> = { ...extra };
-    if (this.password) h['PW'] = this.password;
+    if (this.password) {
+      h['PW'] = this.username
+        ? `${this.username}:${this.password}`
+        : this.password;
+    }
     return h;
   }
 }
