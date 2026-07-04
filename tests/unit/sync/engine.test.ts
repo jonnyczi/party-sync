@@ -7,6 +7,7 @@ import { listRunErrors } from '@/src/db/runs';
 import { runMigrations } from '@/src/db/schema';
 import { createServer } from '@/src/db/servers';
 import { runJob } from '@/src/sync/engine';
+import { dateSubdir } from '@/src/sync/path-organization';
 import { ProgressBus } from '@/src/sync/progress';
 import type { SourceWalker, WalkerEntry } from '@/src/sync/walker/types';
 
@@ -229,6 +230,48 @@ describe('engine.runJob', () => {
     expect(server.chunkPosts).toBe(3);
     expect(server.handshakes).toBe(2);
   });
+
+  it('flattens into a date folder when path_organization is set', async () => {
+    const mtimeMs = new Date(2026, 5, 20, 12, 0).getTime(); // 2026-06-20 local
+    const entry: WalkerEntry = {
+      localPath: 'Trips/Italy/photo.jpg',
+      uri: 'content://fake/photo.jpg',
+      relativePath: 'Trips/Italy/photo.jpg',
+      size: 1000,
+      mtimeMs,
+    };
+    const dateJobId = await createJob(db, {
+      server_id: (await db.getFirstAsync<{ server_id: number }>(
+        'SELECT server_id FROM jobs WHERE id = ?',
+        [jobId],
+      ))!.server_id,
+      name: 'dated',
+      source_kind: 'saf',
+      source_uri: 'content://fake/tree',
+      remote_path: '/target',
+      path_organization: 'year_month_day',
+    });
+
+    const server = makeFakeServer([entry]);
+    const run = await runJob(
+      {
+        db,
+        walker: fakeWalker([entry]),
+        client: server.client,
+        fileSource: makeFileSource([entry]),
+        sleep: noSleep,
+      },
+      dateJobId,
+    );
+
+    expect(run.files_uploaded).toBe(1);
+    const expectedSub = dateSubdir(mtimeMs, 'year_month_day'); // 2026/06/20
+    expect(server.handshakeUrls[0]).toBe(
+      `http://localhost:9999/target/${expectedSub}/`,
+    );
+    // Local subfolders are dropped in date mode.
+    expect(server.handshakeUrls[0]).not.toContain('Trips');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -294,13 +337,14 @@ interface FakeServer {
   client: CopypartyClient;
   handshakes: number;
   chunkPosts: number;
+  handshakeUrls: string[];
 }
 
 function makeFakeServer(
   entries: WalkerEntry[],
   opts: FakeServerOptions = {},
 ): FakeServer {
-  const state = { handshakes: 0, chunkPosts: 0 };
+  const state = { handshakes: 0, chunkPosts: 0, handshakeUrls: [] as string[] };
   // wark → uploaded chunk hashes
   const serverSeen = new Map<string, Set<string>>();
   // name → assigned wark (stable across handshakes)
@@ -317,6 +361,7 @@ function makeFakeServer(
       if (!headers['x-up2k-hash']) {
         // handshake
         state.handshakes++;
+        state.handshakeUrls.push(_url);
         const body = JSON.parse(init?.body as string) as {
           name: string;
           size: number;
@@ -372,6 +417,9 @@ function makeFakeServer(
     },
     get chunkPosts() {
       return state.chunkPosts;
+    },
+    get handshakeUrls() {
+      return state.handshakeUrls;
     },
   };
 }

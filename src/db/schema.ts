@@ -86,6 +86,13 @@ const MIGRATIONS: Migration[] = [
       ALTER TABLE runs ADD COLUMN skip_reason TEXT;
     `,
   },
+  {
+    version: 3,
+    up: `
+      ALTER TABLE jobs ADD COLUMN path_organization TEXT NOT NULL DEFAULT 'flat'
+        CHECK (path_organization IN ('flat','year','year_month','year_month_day'));
+    `,
+  },
 ];
 
 /**

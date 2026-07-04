@@ -31,9 +31,16 @@ import {
   listRunsForJob,
 } from '@/src/db/runs';
 import { listServers } from '@/src/db/servers';
-import type { RunErrorRow, RunRow, ServerRow, SourceKind } from '@/src/db/types';
+import type {
+  PathOrganization,
+  RunErrorRow,
+  RunRow,
+  ServerRow,
+  SourceKind,
+} from '@/src/db/types';
 import { getServerPassword } from '@/src/storage/secrets';
 import { ensureNotificationPermission } from '@/src/sync/notify-permission';
+import { dateSubdir, PATH_ORGANIZATIONS } from '@/src/sync/path-organization';
 import type { ActiveRunSnapshot } from '@/src/sync/progress';
 import {
   nextPeriodicRunAt,
@@ -42,6 +49,23 @@ import {
 import { syncPeriodicRegistration } from '@/src/sync/scheduler-register';
 import { runJobManual } from '@/src/sync/triggers/manual';
 import { MEDIA_SOURCE_ALL } from '@/src/sync/walker/media';
+
+const PATH_ORG_LABELS: Record<PathOrganization, string> = {
+  flat: 'None (flat)',
+  year: 'By year',
+  year_month: 'By year / month',
+  year_month_day: 'By year / month / day',
+};
+
+// 2026-06-20 (local) — drives the live example path shown next to each option.
+const EXAMPLE_MTIME_MS = new Date(2026, 5, 20).getTime();
+
+function examplePath(remotePath: string, mode: PathOrganization): string {
+  const normalized = normalizeRemotePath(remotePath) || '/phone-backups/camera';
+  const base = normalized === '/' ? '' : normalized;
+  const sub = dateSubdir(EXAMPLE_MTIME_MS, mode);
+  return sub ? `${base}/${sub}/photo.jpg` : `${base}/photo.jpg`;
+}
 
 export default function JobEditScreen() {
   const { id: idParam } = useLocalSearchParams<{ id: string }>();
@@ -62,6 +86,7 @@ export default function JobEditScreen() {
   const [sourceKind, setSourceKind] = useState<SourceKind>('saf');
   const [sourceUri, setSourceUri] = useState('');
   const [remotePath, setRemotePath] = useState('');
+  const [pathOrganization, setPathOrganization] = useState<PathOrganization>('flat');
   const [browserVisible, setBrowserVisible] = useState(false);
   const [browserConn, setBrowserConn] = useState<{
     baseUrl: string;
@@ -105,6 +130,7 @@ export default function JobEditScreen() {
       setSourceKind(row.source_kind);
       setSourceUri(row.source_uri);
       setRemotePath(row.remote_path);
+      setPathOrganization(row.path_organization);
       setPeriodicEnabled(row.periodic_enabled === 1);
       setPeriodicMinutes(row.periodic_minutes);
       setPeriodicMinutesText(String(row.periodic_minutes));
@@ -178,6 +204,7 @@ export default function JobEditScreen() {
       source_kind: sourceKind,
       source_uri: sourceUri,
       remote_path: normalizeRemotePath(remotePath),
+      path_organization: pathOrganization,
       periodic_enabled: periodicEnabled,
       periodic_minutes: clampedMinutes,
       wifi_only: wifiOnly,
@@ -539,6 +566,47 @@ export default function JobEditScreen() {
                 Select a server above to browse its folders.
               </ThemedText>
             ) : null}
+          </Field>
+
+          <Field label="Organize by date">
+            <View style={styles.serverList}>
+              {PATH_ORGANIZATIONS.map((mode) => {
+                const selected = pathOrganization === mode;
+                return (
+                  <Pressable
+                    key={mode}
+                    onPress={() => setPathOrganization(mode)}
+                    style={({ pressed }) => [
+                      styles.serverRow,
+                      selected && { borderColor: Colors[scheme].tint, borderWidth: 2 },
+                      !selected && { borderColor: Colors[scheme].icon },
+                      { opacity: pressed ? 0.7 : 1 },
+                    ]}>
+                    <View style={{ flex: 1 }}>
+                      <ThemedText type="defaultSemiBold">
+                        {PATH_ORG_LABELS[mode]}
+                      </ThemedText>
+                      <ThemedText style={styles.serverUrl} numberOfLines={1}>
+                        {examplePath(remotePath, mode)}
+                      </ThemedText>
+                    </View>
+                    {selected ? (
+                      <IconSymbol
+                        name="checkmark.circle.fill"
+                        color={Colors[scheme].tint}
+                        size={22}
+                      />
+                    ) : null}
+                  </Pressable>
+                );
+              })}
+            </View>
+            <ThemedText style={styles.hint}>
+              Buckets uploads into folders by each file&apos;s modification date.
+              {sourceKind === 'saf'
+                ? ' Date modes flatten the local subfolder structure.'
+                : ''}
+            </ThemedText>
           </Field>
 
           <SchedulePanel

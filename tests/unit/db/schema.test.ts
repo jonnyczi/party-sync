@@ -73,6 +73,15 @@ describe('runMigrations', () => {
     expect(runCols.map((c) => c.name)).toContain('skip_reason');
   });
 
+  it('migration v3 adds path_organization to jobs', async () => {
+    await runMigrations(db);
+    const jobCols = await db.getAllAsync<{ name: string }>(
+      "PRAGMA table_info('jobs')",
+      [],
+    );
+    expect(jobCols.map((c) => c.name)).toContain('path_organization');
+  });
+
   it('enables foreign key enforcement', async () => {
     await runMigrations(db);
     const row = await db.getFirstAsync<{ foreign_keys: number }>(

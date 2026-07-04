@@ -14,6 +14,7 @@ import type {
   RunTrigger,
 } from '../db/types';
 
+import { dateSubdir } from './path-organization';
 import { ProgressBus } from './progress';
 import type { SourceWalker } from './walker/types';
 
@@ -89,7 +90,12 @@ export async function runJob(
       }
 
       const name = basename(entry.relativePath);
-      const subDir = dirname(entry.relativePath);
+      // Date modes flatten the local subfolder structure into Y/M/D buckets;
+      // 'flat' keeps the file's original relative directory.
+      const subDir =
+        job.path_organization === 'flat'
+          ? dirname(entry.relativePath)
+          : dateSubdir(entry.mtimeMs, job.path_organization);
       const remoteFolder = joinRemote(job.remote_path, subDir);
       const lmod = Math.max(0, Math.floor(entry.mtimeMs / 1000));
 

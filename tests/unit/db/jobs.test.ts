@@ -41,6 +41,41 @@ describe('jobs DAO', () => {
     expect(row?.rehash_interval_days).toBe(30);
     expect(row?.periodic_enabled).toBe(0);
     expect(row?.periodic_minutes).toBe(60);
+    expect(row?.path_organization).toBe('flat');
+  });
+
+  it('round-trips path_organization', async () => {
+    const id = await createJob(db, {
+      server_id: serverId,
+      name: 'photos',
+      source_kind: 'media',
+      source_uri: 'bucket:camera',
+      remote_path: '/photos',
+      path_organization: 'year_month_day',
+    });
+    let row = await getJob(db, id);
+    expect(row?.path_organization).toBe('year_month_day');
+
+    await updateJob(db, id, {
+      server_id: serverId,
+      name: 'photos',
+      source_kind: 'media',
+      source_uri: 'bucket:camera',
+      remote_path: '/photos',
+      path_organization: 'year',
+    });
+    row = await getJob(db, id);
+    expect(row?.path_organization).toBe('year');
+  });
+
+  it('rejects invalid path_organization via CHECK', async () => {
+    await expect(
+      db.runAsync(
+        `INSERT INTO jobs (server_id, name, source_kind, source_uri, remote_path, path_organization, created_at, updated_at)
+         VALUES (?, 'bad', 'saf', 'x', '/y', 'weekly', ?, ?)`,
+        [serverId, Date.now(), Date.now()],
+      ),
+    ).rejects.toThrow();
   });
 
   it('round-trips periodic fields', async () => {

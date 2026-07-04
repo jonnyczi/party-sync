@@ -1,5 +1,5 @@
 import type { SqliteDb } from './adapter';
-import type { JobRow, SourceKind } from './types';
+import type { JobRow, PathOrganization, SourceKind } from './types';
 
 export interface JobInput {
   server_id: number;
@@ -7,6 +7,7 @@ export interface JobInput {
   source_kind: SourceKind;
   source_uri: string;
   remote_path: string;
+  path_organization?: PathOrganization;
   propagate_deletes?: boolean;
   wifi_only?: boolean;
   respect_data_saver?: boolean;
@@ -51,17 +52,18 @@ export async function createJob(
   const now = Date.now();
   const res = await db.runAsync(
     `INSERT INTO jobs (
-       server_id, name, source_kind, source_uri, remote_path,
+       server_id, name, source_kind, source_uri, remote_path, path_organization,
        propagate_deletes, wifi_only, respect_data_saver, charging_only,
        rehash_interval_days, periodic_enabled, periodic_minutes,
        created_at, updated_at
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       input.server_id,
       input.name,
       input.source_kind,
       input.source_uri,
       input.remote_path,
+      input.path_organization ?? 'flat',
       bool(input.propagate_deletes, 0),
       bool(input.wifi_only, 1),
       bool(input.respect_data_saver, 1),
@@ -84,6 +86,7 @@ export async function updateJob(
   await db.runAsync(
     `UPDATE jobs SET
        server_id = ?, name = ?, source_kind = ?, source_uri = ?, remote_path = ?,
+       path_organization = ?,
        propagate_deletes = ?, wifi_only = ?, respect_data_saver = ?, charging_only = ?,
        rehash_interval_days = ?, periodic_enabled = ?, periodic_minutes = ?,
        updated_at = ?
@@ -94,6 +97,7 @@ export async function updateJob(
       input.source_kind,
       input.source_uri,
       input.remote_path,
+      input.path_organization ?? 'flat',
       bool(input.propagate_deletes, 0),
       bool(input.wifi_only, 1),
       bool(input.respect_data_saver, 1),

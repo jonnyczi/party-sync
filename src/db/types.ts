@@ -10,6 +10,13 @@ export interface ServerRow {
 
 export type SourceKind = 'saf' | 'media';
 
+/**
+ * How a job buckets uploads into date subfolders under `remote_path`, based on
+ * each file's modification time. `flat` preserves the local subfolder structure
+ * (legacy behavior); the date modes flatten it into Y / Y-M / Y-M-D folders.
+ */
+export type PathOrganization = 'flat' | 'year' | 'year_month' | 'year_month_day';
+
 export interface JobRow {
   id: number;
   server_id: number;
@@ -17,6 +24,7 @@ export interface JobRow {
   source_kind: SourceKind;
   source_uri: string;
   remote_path: string;
+  path_organization: PathOrganization;
   propagate_deletes: number;
   wifi_only: number;
   respect_data_saver: number;
