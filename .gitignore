@@ -24,6 +24,10 @@ expo-env.d.ts
 *.apk
 *.aab
 
+# Local nix/gradle caches exported by `dagger call nix-store`/`gradle-store` (CI uses these)
+/nixcache/
+/gradlecache.tar
+
 # Metro
 .metro-health-check*
 

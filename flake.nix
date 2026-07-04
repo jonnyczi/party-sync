@@ -45,6 +45,10 @@
           pkgs.nodejs_22
           pkgs.curl
           pkgs.git
+          # Compiler cache for the RN/Reanimated NDK C++ builds — wired into the
+          # CMake compiles via scripts/ccache.init.gradle so unchanged translation
+          # units aren't recompiled across CI runs (the dominant build cost).
+          pkgs.ccache
           # For downscaling emulator screencaps before feeding them to Claude —
           # vision tokens are driven by pixel count, not file size.
           pkgs.imagemagick

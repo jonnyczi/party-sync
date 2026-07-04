@@ -124,6 +124,45 @@ in the release APK.
 - **Cleartext HTTP is blocked in release builds** — plain `http://` copyparty
   servers fail at runtime with "Network request failed" (works in dev). Needs a
   network-security-config decision via `app.json`/config plugin. Not yet fixed.
-- **Cold Nix builds in CI** — GitHub-hosted runners have no persistent `/nix`,
-  so `build-apk` rebuilds the toolchain each run (slow). Mitigate with Dagger
-  Cloud caching or a self-hosted runner.
+- **Build caching in CI** — GitHub-hosted runners are ephemeral, so the build
+  re-realizes the toolchain each run. The single cache that survives is the **nix
+  toolchain**:
+  - **Nix toolchain** (`./nixcache`, keyed on `flake.lock`) — a `file://` nix
+    binary cache fed back via `--nix-cache`, used as a local substituter so
+    `nix develop` skips the ~5.4 GB cache.nixos.org download. `nix-store` warms
+    it on a miss. Measured: ~1m35s restore (hit) vs a 9m cold warm.
+
+  There is deliberately **no cross-run gradle/ccache cache in CI** — see the disk
+  note below. Each CI `build-apk` is therefore a cold gradle build (~26 min,
+  ARM-only). Warm gradle + ccache *do* still apply to **local / self-hosted /
+  Dagger Cloud** builds: the `.dagger` build helper falls back to the engine's own
+  `cacheVolume` for `/root/.gradle` when no `--gradle-cache` is passed, and a
+  persistent engine keeps that warm across runs. `scripts/ccache.init.gradle` +
+  `--build-cache` still wire ccache/the gradle build-cache into those builds (the
+  `ccache -s` summary at the end of the build log shows the hit rate). The real
+  fix for fast *CI* builds is a **self-hosted runner** or **Dagger Cloud** (both
+  declined for now), which also removes the export/import dance entirely.
+- **Disk on GitHub-hosted runners is the tight constraint** (this is *why* there's
+  no CI gradle cache). The runner image has a **single ~72 GB filesystem** — `/`
+  and `/mnt` are the same `/dev/root` (verified via `df`), so there's no large
+  scratch disk to offload Docker onto. Everything shares it: the Dagger engine +
+  the realized nix store + the gradle build's intermediates. Measured headroom
+  after cleanup is only **~36 GB**, and a restored gradle-home tarball costs ~7 GB
+  (3.5 GB on the host + 3.5 GB untarred inside the engine) — enough to tip it over
+  and fail mid-build. The mitigations that make the build fit:
+  - `jlumbroso/free-disk-space` with **`tool-cache: true`** (the ~10 GB it skips
+    by default) + swap. The build runs fully in-container, so the host tool-cache
+    is unused.
+  - **No CI gradle/ccache tarball cache** (the ~7 GB straw that broke the disk).
+  - **Release builds ship ARM only** — `reactNativeArchitectures=armeabi-v7a,
+    arm64-v8a` (set three ways in `scripts/ci-android-build.sh`: top-level default,
+    a `gradle.properties` pin, and `-P`; the F-Droid recipe overrides
+    `gradle.properties` to match). The default four-ABI build recompiles every
+    native lib for x86/x86_64 too (emulator-only), ~doubling both build time and
+    the intermediate `.cxx` footprint. Confirmed via `ccache -s`: 100 cacheable
+    C++ calls (2 ABIs) vs 200 (4 ABIs). Interactive `expo run:android` dev builds
+    don't use this script, so the x86_64 emulator keeps all ABIs.
+  - When the disk fills it crashes the runner's own log worker
+    (`No space left on device: …/Worker_*.log`), which is why a disk-overflowing
+    build job uploads **no step logs** — check the job-level failure annotation
+    (`gh api repos/<o>/<r>/check-runs/<job-id>/annotations`) instead.

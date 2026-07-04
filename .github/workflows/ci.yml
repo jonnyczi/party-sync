@@ -21,6 +21,17 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install Dagger CLI
         run: curl -fsSL https://dl.dagger.io/dagger/install.sh | DAGGER_VERSION="$DAGGER_VERSION" BIN_DIR=/usr/local/bin sh
+      # Pull the engine from the GHCR mirror (registry.dagger.io rate-limits
+      # GitHub runner IPs) and start it under the name + image tag the Dagger CLI
+      # expects, so it uses its normal persistent-engine path — no pull, and none
+      # of the filesync flakiness of _EXPERIMENTAL_DAGGER_RUNNER_HOST=docker-image.
+      - name: Start Dagger engine (GHCR mirror)
+        run: |
+          for i in 1 2 3; do docker pull "ghcr.io/jonnyczi/dagger-engine:v${DAGGER_VERSION}" && break; echo "pull retry $i"; sleep 10; done
+          docker tag "ghcr.io/jonnyczi/dagger-engine:v${DAGGER_VERSION}" "registry.dagger.io/engine:v${DAGGER_VERSION}"
+          docker run -d --name "dagger-engine-v${DAGGER_VERSION}" --privileged --restart always \
+            -v "dagger-engine-v${DAGGER_VERSION}:/var/lib/dagger" \
+            "registry.dagger.io/engine:v${DAGGER_VERSION}" --debug --debugaddr 127.0.0.1:6060
       - name: Lint
         run: dagger call lint
       - name: Unit tests
@@ -33,19 +44,71 @@ jobs:
   build:
     if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
+    # Cold gradle build every run (no CI gradle cache — it overflows the disk):
+    # ~33 min observed (ARM-only). Generous timeout for a cold nix warm + build.
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
-      # GitHub-hosted runners have only ~14 GB free on / (where Docker stores the
-      # Dagger engine + the cold nix store), which the Android toolchain blows
-      # past ("No space left on device"). Reclaim the ~25-30 GB of preinstalled
-      # tooling we don't use (.NET, Haskell, the runner's own Android SDK, etc.).
+      # This runner has a SINGLE ~72 GB filesystem — / and /mnt are the same
+      # /dev/root (verified via df), so there's no big scratch disk to offload to.
+      # Everything (Docker's engine + the cold nix store + the untarred gradle
+      # home + the 4-ABI native build) shares that one disk, and the warm build
+      # blows past it ("No space left on device"). Reclaim the most we can:
+      # tool-cache (~10 GB) is the big one the action skips by default.
       - name: Free disk space
         uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: true # /opt/hostedtoolcache, ~10 GB — unused (build runs in-container)
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          swap-storage: true
+          docker-images: false # we pull our own engine image next; don't disturb docker
+      # Persist the ~5.4 GB nix toolchain (file:// binary cache) across runs so
+      # the build pulls it locally instead of re-downloading from cache.nixos.org.
+      # Keyed on flake.lock — immutable per toolchain version, so near-100% hits.
+      - name: Restore nix toolchain cache
+        id: nixcache
+        uses: actions/cache@v4
+        with:
+          path: ./nixcache
+          key: nix-toolchain-${{ runner.os }}-${{ hashFiles('flake.lock') }}
+      # NOTE: there is deliberately no cross-run gradle/ccache cache here. The
+      # gradle home (~3.5 GB) shuttled as a tarball overflows this runner's single
+      # ~72 GB disk (measured: only ~36 GB free, and the tarball costs ~7 GB once
+      # restored to the host AND untarred inside the engine). The build is ARM-only
+      # (~26 min) and the nix toolchain cache above is the big win. Warm gradle +
+      # ccache still work for local / self-hosted / Dagger Cloud builds via the
+      # engine's own cacheVolume (.dagger build helper's no-gradleCache branch).
       - name: Install Dagger CLI
         run: curl -fsSL https://dl.dagger.io/dagger/install.sh | DAGGER_VERSION="$DAGGER_VERSION" BIN_DIR=/usr/local/bin sh
+      # Pull the engine from the GHCR mirror (registry.dagger.io rate-limits
+      # GitHub runner IPs) and start it under the name + image tag the Dagger CLI
+      # expects, so it uses its normal persistent-engine path — no pull, and none
+      # of the filesync flakiness of _EXPERIMENTAL_DAGGER_RUNNER_HOST=docker-image.
+      - name: Start Dagger engine (GHCR mirror)
+        run: |
+          for i in 1 2 3; do docker pull "ghcr.io/jonnyczi/dagger-engine:v${DAGGER_VERSION}" && break; echo "pull retry $i"; sleep 10; done
+          docker tag "ghcr.io/jonnyczi/dagger-engine:v${DAGGER_VERSION}" "registry.dagger.io/engine:v${DAGGER_VERSION}"
+          docker run -d --name "dagger-engine-v${DAGGER_VERSION}" --privileged --restart always \
+            -v "dagger-engine-v${DAGGER_VERSION}:/var/lib/dagger" \
+            "registry.dagger.io/engine:v${DAGGER_VERSION}" --debug --debugaddr 127.0.0.1:6060
+      # On a cache miss, realize + export the ~5.4 GB toolchain so the build
+      # below (and the post-job cache save) reuse it. Skipped on a hit.
+      - name: Warm nix toolchain cache
+        if: steps.nixcache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ./nixcache
+          dagger call nix-store --nix-cache=./nixcache export --path ./nixcache
+      # Headroom probe — log free space on the one shared disk before the build, so
+      # a future disk regression is visible in the logs (it was ~36 GB free here).
+      - name: Disk space before build
+        run: df -h / /var/lib/docker
       - name: Build APK (unsigned)
-        run: dagger call build-apk export --path ./out/app-release.apk
+        run: |
+          mkdir -p ./nixcache
+          dagger call build-apk --nix-cache=./nixcache export --path ./out/app-release.apk
       # F-Droid regression guard: fail if any Firebase/GMS class sneaks back in.
       - name: Scan APK for non-free (Firebase/GMS) classes
         run: python3 scripts/scan-nonfree-apk.py ./out/app-release.apk

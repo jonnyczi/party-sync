@@ -1,0 +1,25 @@
+// Route the Android NDK / CMake C++ compiles (React Native core, Reanimated,
+// Worklets, etc.) through ccache. Applied with `gradlew --init-script`, it adds
+// the ccache compiler launchers to every android subproject's CMake build, so
+// unchanged translation units are served from ccache instead of recompiled —
+// the recompile is the dominant cost of the Android build on CI.
+//
+// Defensive: wrapped in try/catch so an AGP DSL change never breaks the build
+// (worst case ccache just isn't wired and we recompile as before).
+gradle.beforeProject { project ->
+  ["com.android.application", "com.android.library"].each { pluginId ->
+    project.plugins.withId(pluginId) {
+      project.afterEvaluate {
+        try {
+          project.android.defaultConfig.externalNativeBuild.cmake.arguments(
+            "-DCMAKE_C_COMPILER_LAUNCHER=ccache",
+            "-DCMAKE_CXX_COMPILER_LAUNCHER=ccache"
+          )
+          project.logger.info("[ccache] wired CMake launchers for ${project.path}")
+        } catch (Throwable t) {
+          project.logger.lifecycle("[ccache] skipped for ${project.path}: ${t.message}")
+        }
+      }
+    }
+  }
+}

@@ -19,19 +19,43 @@ env:
 jobs:
   release:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    # Cold gradle builds (no CI gradle cache — see ci.yml), and this builds BOTH
+    # the APK and the AAB, so allow ample time.
+    timeout-minutes: 120
     permissions:
       contents: write # create the GitHub Release
     steps:
       - uses: actions/checkout@v4
 
       # The release build is the heaviest (APK + AAB via the nixos/nix
-      # container). GitHub-hosted runners only have ~14 GB free on /, so reclaim
-      # the preinstalled tooling we don't use or it fails with "No space left on
-      # device".
+      # container) and this runner has a SINGLE ~72 GB filesystem (/ and /mnt are
+      # the same /dev/root — no big scratch disk to offload to), so reclaim the
+      # most we can or it fails with "No space left on device". tool-cache
+      # (~10 GB) is the big one the action skips by default (see ci.yml).
       - name: Free disk space
         uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: true
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          swap-storage: true
+          docker-images: false
 
+      # Reuse the ~5.4 GB nix toolchain across runs (keyed on flake.lock) instead
+      # of re-downloading it from cache.nixos.org every release.
+      - name: Restore nix toolchain cache
+        id: nixcache
+        uses: actions/cache@v4
+        with:
+          path: ./nixcache
+          key: nix-toolchain-${{ runner.os }}-${{ hashFiles('flake.lock') }}
+
+      # No cross-run gradle/ccache tarball cache: it overflows this runner's single
+      # ~72 GB disk (see ci.yml). The build is ARM-only and the nix cache above is
+      # the win; warm gradle/ccache still apply to local / self-hosted / Dagger
+      # Cloud builds via the engine's cacheVolume.
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -43,23 +67,45 @@ jobs:
 
       - name: Install Dagger CLI
         run: curl -fsSL https://dl.dagger.io/dagger/install.sh | DAGGER_VERSION="$DAGGER_VERSION" BIN_DIR=/usr/local/bin sh
+      # Start the engine from the GHCR mirror under the name/tag the CLI expects
+      # (see ci.yml) — normal persistent-engine path, no pull, reliable filesync.
+      - name: Start Dagger engine (GHCR mirror)
+        run: |
+          for i in 1 2 3; do docker pull "ghcr.io/jonnyczi/dagger-engine:v${DAGGER_VERSION}" && break; echo "pull retry $i"; sleep 10; done
+          docker tag "ghcr.io/jonnyczi/dagger-engine:v${DAGGER_VERSION}" "registry.dagger.io/engine:v${DAGGER_VERSION}"
+          docker run -d --name "dagger-engine-v${DAGGER_VERSION}" --privileged --restart always \
+            -v "dagger-engine-v${DAGGER_VERSION}:/var/lib/dagger" \
+            "registry.dagger.io/engine:v${DAGGER_VERSION}" --debug --debugaddr 127.0.0.1:6060
+
+      # On a cache miss, realize + export the toolchain so the signed builds
+      # below (and the post-job cache save) reuse it. Skipped on a hit.
+      - name: Warm nix toolchain cache
+        if: steps.nixcache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ./nixcache
+          dagger call nix-store --nix-cache=./nixcache export --path ./nixcache
 
       - name: Decode upload keystore
         run: echo "${{ secrets.UPLOAD_KEYSTORE_BASE64 }}" | base64 -d > "$RUNNER_TEMP/upload.keystore"
 
+      - name: Disk space before build
+        run: df -h / /var/lib/docker
       - name: Build signed APK + AAB
         env:
           STORE_PW: ${{ secrets.UPLOAD_STORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.UPLOAD_KEY_ALIAS }}
           KEY_PW: ${{ secrets.UPLOAD_KEY_PASSWORD }}
         run: |
+          mkdir -p ./nixcache
           dagger call build-apk \
+            --nix-cache=./nixcache \
             --keystore="file:$RUNNER_TEMP/upload.keystore" \
             --keystore-password=env:STORE_PW \
             --key-alias=env:KEY_ALIAS \
             --key-password=env:KEY_PW \
             export --path ./out/copyparty-${{ github.ref_name }}.apk
           dagger call build-aab \
+            --nix-cache=./nixcache \
             --keystore="file:$RUNNER_TEMP/upload.keystore" \
             --keystore-password=env:STORE_PW \
             --key-alias=env:KEY_ALIAS \
