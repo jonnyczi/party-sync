@@ -1,0 +1,7 @@
+First field-test release of the copyparty client for Android.
+
+- Configure copyparty servers and create upload jobs
+- Manual sync plus periodic background sync with live progress
+- Camera-roll source, date-organized uploads, server folder browser
+- Export/import app settings (backup & restore)
+- Works with plain http:// servers on a LAN

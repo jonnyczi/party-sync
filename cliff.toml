@@ -1,0 +1,55 @@
+# git-cliff configuration — generates CHANGELOG.md and the per-release GitHub
+# notes from the git history. The repo mixes Conventional Commits
+# (feat:/fix:/ci:/docs:) with some plain-summary commits (e.g. "Phase 5: …",
+# "Add …"); `filter_unconventional = false` plus a catch-all "Other" parser
+# ensures direct-to-master commits are captured, not just merged PRs.
+# Usage: `npx git-cliff -o CHANGELOG.md` (whole history) or
+#        `npx git-cliff --latest --strip all` (current tag's notes only).
+
+[changelog]
+header = """
+# Changelog
+
+All notable changes to this project are documented here. This file is generated
+from the git history by [git-cliff](https://git-cliff.org).\n
+"""
+body = """
+{% if version %}\
+    ## [{{ version | trim_start_matches(pat="v") }}] - {{ timestamp | date(format="%Y-%m-%d") }}
+{% else %}\
+    ## [Unreleased]
+{% endif %}\
+{% for group, commits in commits | group_by(attribute="group") %}
+    ### {{ group | striptags | trim | upper_first }}
+    {% for commit in commits %}
+        - {% if commit.scope %}*({{ commit.scope }})* {% endif %}\
+            {% if commit.breaking %}[**breaking**] {% endif %}\
+            {{ commit.message | split(pat="\n") | first | upper_first }}\
+    {% endfor %}
+{% endfor %}\n
+"""
+trim = true
+footer = ""
+
+[git]
+conventional_commits = true
+filter_unconventional = false
+split_commits = false
+commit_parsers = [
+    { message = "^feat", group = "Features" },
+    { message = "^fix", group = "Bug Fixes" },
+    { message = "^docs", group = "Documentation" },
+    { message = "^perf", group = "Performance" },
+    { message = "^refactor", group = "Refactor" },
+    { message = "^test", group = "Testing" },
+    { message = "^ci", group = "CI/Build" },
+    { message = "^build", group = "CI/Build" },
+    { message = "^chore", group = "Miscellaneous" },
+    { message = "^Merge ", skip = true },
+    { message = ".*", group = "Other" },
+]
+protect_breaking_commits = false
+filter_commits = false
+tag_pattern = "v[0-9]*"
+topo_order = false
+sort_commits = "newest"
