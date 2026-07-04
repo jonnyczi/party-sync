@@ -1,12 +1,17 @@
 import type { SourceWalker, WalkerEntry } from './types';
 
 /**
- * v1 source_uri sentinel — "all photos and videos, no album filter". Album
- * selection lives in a later phase; the sentinel is stored in
- * `jobs.source_uri` so the schema doesn't change when we add
- * `album:<bucketId>`.
+ * source_uri sentinel — "all photos and videos, no album filter". Stored in
+ * `jobs.source_uri`; the alternative form is `album:<bucketId>` (see
+ * {@link ALBUM_PREFIX}), so the schema never changes — both are plain strings.
  */
 export const MEDIA_SOURCE_ALL = 'all';
+
+/**
+ * Prefix for the single-album source_uri form: `album:<bucketId>`. The bucket
+ * id is MediaLibrary's album id (Android: the MediaStore BUCKET_ID).
+ */
+export const ALBUM_PREFIX = 'album:';
 
 /** Minimal shapes we consume — kept local so unit tests don't need the
  *  expo-media-library types, and so the native-only imports can stay lazy. */
@@ -21,12 +26,16 @@ export interface MediaPage {
   endCursor: string;
   hasNextPage: boolean;
 }
+export type MediaAlbum = { id: string; title: string };
 export interface MediaLibraryLike {
   getAssetsAsync(opts: {
     first: number;
     after?: string;
+    /** Album id to restrict enumeration to; omitted for the whole library. */
+    album?: string;
     mediaType: ('photo' | 'video')[];
   }): Promise<MediaPage>;
+  getAlbumsAsync(opts?: { includeSmartAlbums?: boolean }): Promise<MediaAlbum[]>;
 }
 export interface FileSizer {
   size(uri: string): Promise<number>;
@@ -99,16 +108,35 @@ async function* walkMedia(
   library: MediaLibraryLike,
   sizer: FileSizer,
 ): AsyncIterable<WalkerEntry> {
+  // Resolve the source_uri sentinel into an optional album filter.
+  //   'all'           → whole library (album = undefined)
+  //   'album:<id>'    → that one album
+  // The bucket id is the stable filter key. If it ever changes (rare — a full
+  // MediaStore wipe re-buckets albums), the existence check below throws a
+  // clear run-level error so the user re-picks, rather than the run silently
+  // backing up nothing. After a re-pick the per-asset content-URI keys are
+  // unchanged, so there's no re-upload churn; even when file_state is lost,
+  // up2k dedups server-side. Garbage values throw too (strict validation).
+  let album: string | undefined;
   if (sourceUri !== MEDIA_SOURCE_ALL) {
-    throw new Error(
-      `media walker only supports source_uri '${MEDIA_SOURCE_ALL}' in v1; got '${sourceUri}'`,
-    );
+    if (!sourceUri.startsWith(ALBUM_PREFIX)) {
+      throw new Error(`media walker: unrecognized source_uri '${sourceUri}'`);
+    }
+    const bucketId = sourceUri.slice(ALBUM_PREFIX.length);
+    const albums = await library.getAlbumsAsync();
+    if (!albums.some((a) => a.id === bucketId)) {
+      throw new Error(
+        'Album no longer exists — edit the job to pick another album.',
+      );
+    }
+    album = bucketId;
   }
   let after: string | undefined;
   while (true) {
     const page = await library.getAssetsAsync({
       first: PAGE_SIZE,
       after,
+      album,
       mediaType: ['photo', 'video'],
     });
     for (const asset of page.assets) {

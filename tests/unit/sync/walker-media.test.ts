@@ -17,20 +17,29 @@ interface FakePage {
   totalCount: number;
 }
 
-function fakeLibrary(pages: FakePage[]) {
+function fakeLibrary(
+  pages: FakePage[],
+  albums: { id: string; title: string }[] = [],
+) {
   // One call per page. We assert `after` threading so the walker can't
-  // re-request page 0 by accident and stall.
-  const calls: { first: number; after?: string }[] = [];
+  // re-request page 0 by accident and stall, and capture `album` so the
+  // album-filter forwarding is observable.
+  const calls: { first: number; after?: string; album?: string }[] = [];
   return {
     calls,
-    getAssetsAsync: async (opts: { first: number; after?: string }) => {
-      calls.push({ first: opts.first, after: opts.after });
+    getAssetsAsync: async (opts: {
+      first: number;
+      after?: string;
+      album?: string;
+    }) => {
+      calls.push({ first: opts.first, after: opts.after, album: opts.album });
       const idx = opts.after
         ? pages.findIndex((p, i) => i > 0 && pages[i - 1].endCursor === opts.after)
         : 0;
       if (idx < 0) throw new Error(`fake library: unknown cursor ${opts.after}`);
       return pages[idx];
     },
+    getAlbumsAsync: async () => albums,
   };
 }
 
@@ -174,8 +183,44 @@ describe('mediaWalker', () => {
     expect(out.map((e) => e.relativePath)).toEqual(['img.jpg']);
   });
 
-  it('rejects source_uri values other than the "all" sentinel', async () => {
+  it('rejects unrecognized source_uri sentinels', async () => {
     const walker = createMediaWalker(fakeLibrary([]), fakeSizer({}));
-    await expect(collect(walker.walk('album:42'))).rejects.toThrow(/only supports/);
+    await expect(collect(walker.walk('garbage'))).rejects.toThrow(/unrecognized/);
+  });
+
+  it('forwards the album id to getAssetsAsync and yields that album', async () => {
+    const library = fakeLibrary(
+      [
+        {
+          assets: [
+            { id: '1', filename: 'cam.jpg', mediaType: 'photo', modificationTime: 1 },
+          ],
+          endCursor: 'cA',
+          hasNextPage: false,
+          totalCount: 1,
+        },
+      ],
+      [
+        { id: 'cam', title: 'Camera' },
+        { id: 'screens', title: 'Screenshots' },
+      ],
+    );
+    const sizer = fakeSizer({ 'content://media/external/images/media/1': 10 });
+
+    const walker = createMediaWalker(library, sizer);
+    const out = await collect(walker.walk('album:cam'));
+
+    expect(out.map((e) => e.relativePath)).toEqual(['cam.jpg']);
+    // Every enumeration page is scoped to the chosen album.
+    expect(library.calls).toHaveLength(1);
+    expect(library.calls[0].album).toBe('cam');
+  });
+
+  it('throws a clear error when the saved album no longer exists', async () => {
+    const library = fakeLibrary([], [{ id: 'cam', title: 'Camera' }]);
+    const walker = createMediaWalker(library, fakeSizer({}));
+    await expect(collect(walker.walk('album:gone'))).rejects.toThrow(
+      /no longer exists/,
+    );
   });
 });

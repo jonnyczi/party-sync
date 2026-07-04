@@ -251,6 +251,8 @@ describe('engine end-to-end against copyparty', () => {
           endCursor: 'end',
           hasNextPage: false,
         }),
+        // Unused on the 'all' path; present to satisfy MediaLibraryLike.
+        getAlbumsAsync: async () => [],
       };
       const sizer = {
         size: async (uri: string) => {

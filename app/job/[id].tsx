@@ -15,6 +15,7 @@ import {
   View,
 } from 'react-native';
 
+import { AlbumPicker } from '@/components/album-picker';
 import { RemotePathBrowser } from '@/components/remote-path-browser';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -48,6 +49,7 @@ import type {
   SourceKind,
 } from '@/src/db/types';
 import { getServerPassword } from '@/src/storage/secrets';
+import { listMediaAlbums, type AlbumOption } from '@/src/media/albums';
 import { ensureNotificationPermission } from '@/src/sync/notify-permission';
 import { dateSubdir, PATH_ORGANIZATIONS } from '@/src/sync/path-organization';
 import type { ActiveRunSnapshot } from '@/src/sync/progress';
@@ -58,7 +60,7 @@ import {
 import { requestCancel } from '@/src/sync/run-control';
 import { syncPeriodicRegistration } from '@/src/sync/scheduler-register';
 import { runJobManual } from '@/src/sync/triggers/manual';
-import { MEDIA_SOURCE_ALL } from '@/src/sync/walker/media';
+import { ALBUM_PREFIX, MEDIA_SOURCE_ALL } from '@/src/sync/walker/media';
 
 const PATH_ORG_LABELS: Record<PathOrganization, string> = {
   flat: 'None (flat)',
@@ -95,6 +97,9 @@ export default function JobEditScreen() {
   // segmented control renders as read-only.
   const [sourceKind, setSourceKind] = useState<SourceKind>('saf');
   const [sourceUri, setSourceUri] = useState('');
+  const [albumPickerVisible, setAlbumPickerVisible] = useState(false);
+  // Albums loaded only to resolve the saved `album:<id>` into a readable title.
+  const [mediaAlbums, setMediaAlbums] = useState<AlbumOption[]>([]);
   const [remotePath, setRemotePath] = useState('');
   const [pathOrganization, setPathOrganization] = useState<PathOrganization>('flat');
   const [browserVisible, setBrowserVisible] = useState(false);
@@ -180,6 +185,19 @@ export default function JobEditScreen() {
     refreshHistory();
   }, [refreshHistory]);
 
+  // Resolve `album:<id>` into a readable title for the scope row. No prompt —
+  // a passive label pass shouldn't surface a permission dialog. Reloads when
+  // the picker closes so a freshly granted permission / new pick resolves.
+  useEffect(() => {
+    if (sourceKind !== 'media' || albumPickerVisible) return;
+    let cancelled = false;
+    listMediaAlbums().then((found) => {
+      if (!cancelled) setMediaAlbums(found);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [sourceKind, albumPickerVisible]);
 
   const pickFolder = async () => {
     try {
@@ -411,6 +429,12 @@ export default function JobEditScreen() {
   ];
   const placeholder = Colors[scheme].icon;
 
+  const albumScopeLabel =
+    sourceUri.startsWith(ALBUM_PREFIX)
+      ? mediaAlbums.find((a) => a.id === sourceUri.slice(ALBUM_PREFIX.length))
+          ?.title ?? '(album)'
+      : 'All photos & videos';
+
   return (
     <KeyboardAvoidingView
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -547,20 +571,28 @@ export default function JobEditScreen() {
             </Field>
           ) : (
             <Field label="Camera roll scope">
-              <View
-                style={[
+              <Pressable
+                onPress={() => setAlbumPickerVisible(true)}
+                style={({ pressed }) => [
                   styles.pickBtn,
-                  { borderColor: Colors[scheme].icon, gap: 8 },
+                  { borderColor: Colors[scheme].icon, opacity: pressed ? 0.7 : 1 },
                 ]}>
                 <IconSymbol
                   name="photo.on.rectangle"
                   color={Colors[scheme].tint}
                   size={20}
                 />
-                <ThemedText>All photos and videos</ThemedText>
-              </View>
+                <ThemedText style={{ flex: 1 }} numberOfLines={1}>
+                  {albumScopeLabel}
+                </ThemedText>
+                <IconSymbol
+                  name="chevron.right"
+                  color={Colors[scheme].icon}
+                  size={18}
+                />
+              </Pressable>
               <ThemedText style={styles.hint}>
-                Album filtering comes in a later release.
+                Back up your whole camera roll or just one album.
               </ThemedText>
             </Field>
           )}
@@ -813,6 +845,14 @@ export default function JobEditScreen() {
             initialPath={normalizeRemotePath(remotePath) || '/'}
             onClose={() => setBrowserVisible(false)}
             onSelect={setRemotePath}
+          />
+        ) : null}
+        {sourceKind === 'media' ? (
+          <AlbumPicker
+            visible={albumPickerVisible}
+            selected={sourceUri}
+            onSelect={setSourceUri}
+            onClose={() => setAlbumPickerVisible(false)}
           />
         ) : null}
       </ThemedView>
