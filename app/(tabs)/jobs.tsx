@@ -152,7 +152,9 @@ function RunSummary({ run }: { run: RunRow | null }) {
         ? '#d08900'
         : run.status === 'failed'
           ? '#c33'
-          : '#888';
+          : run.status === 'cancelled'
+            ? '#6c757d'
+            : '#888';
   return (
     <View style={styles.runLine}>
       <View style={[styles.statusDot, { backgroundColor: color }]} />

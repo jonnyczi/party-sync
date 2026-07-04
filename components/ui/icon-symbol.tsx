@@ -24,6 +24,7 @@ const MAPPING = {
   'folder.fill': 'folder',
   'photo.on.rectangle': 'photo-library',
   'arrow.triangle.2.circlepath': 'sync',
+  'arrow.clockwise': 'refresh',
   'checkmark.circle.fill': 'check-circle',
   'exclamationmark.triangle.fill': 'warning',
   'xmark.circle.fill': 'cancel',

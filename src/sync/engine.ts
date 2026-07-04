@@ -16,6 +16,7 @@ import type {
 
 import { dateSubdir } from './path-organization';
 import { ProgressBus } from './progress';
+import * as runControl from './run-control';
 import type { SourceWalker, WalkerEntry } from './walker/types';
 
 // v1 retry policy — hard-coded. Applied at the HTTP call level (handshake +
@@ -34,6 +35,11 @@ export interface EngineOptions {
   progress?: ProgressBus;
   now?: () => number;
   sleep?: (ms: number) => Promise<void>;
+  /**
+   * When present, the scan phase keeps only entries whose `localPath` is in this
+   * set. Used by retry-failed to re-run a job scoped to one run's failed files.
+   */
+  filterPaths?: Set<string>;
 }
 
 /**
@@ -87,6 +93,9 @@ export async function runJob(
     const entries: WalkerEntry[] = [];
     let totalBytes = 0;
     for await (const entry of opts.walker.walk(job.source_uri)) {
+      if (runControl.isCancelRequested(runId)) break;
+      // Retry-failed scopes the run to a prior run's failed files.
+      if (opts.filterPaths && !opts.filterPaths.has(entry.localPath)) continue;
       entries.push(entry);
       totalBytes += entry.size;
     }
@@ -184,14 +193,15 @@ export async function runJob(
     };
 
     // Fixed-size worker pool: each worker pulls the next index until the array
-    // is drained or a fatal error halts scheduling. In-flight uploads finish.
+    // is drained, a fatal error halts scheduling, or the run is cancelled.
+    // In-flight uploads finish either way (between-files cancellation).
     let nextIndex = 0;
     const poolSize = Math.max(
       1,
       Math.min(clampConcurrency(job.max_concurrency), entries.length),
     );
     const worker = async (): Promise<void> => {
-      while (!fatal) {
+      while (!fatal && !runControl.isCancelRequested(runId)) {
         const idx = nextIndex++;
         if (idx >= entries.length) return;
         await processEntry(entries[idx]);
@@ -212,21 +222,34 @@ export async function runJob(
   }
 
   progress.setPhase('finalizing');
-  const status: RunStatus = fatal ? 'failed' : failed > 0 ? 'partial' : 'ok';
-  await runsDao.finishRun(opts.db, runId, {
-    status,
-    files_scanned: scanned,
-    files_uploaded: uploaded,
-    files_skipped: skipped,
-    files_failed: failed,
-    bytes_uploaded: bytesUploaded,
-    bytes_deduped: bytesDeduped,
-  });
-  progress.finishRun();
+  // A user-requested cancel wins over partial/ok (counters convey how much got
+  // done); a fatal 401/403 still surfaces as a genuine failure. Read the cancel
+  // state before the `finally` clears the registry entry.
+  const status: RunStatus = fatal
+    ? 'failed'
+    : runControl.isCancelRequested(runId)
+      ? 'cancelled'
+      : failed > 0
+        ? 'partial'
+        : 'ok';
+  try {
+    await runsDao.finishRun(opts.db, runId, {
+      status,
+      files_scanned: scanned,
+      files_uploaded: uploaded,
+      files_skipped: skipped,
+      files_failed: failed,
+      bytes_uploaded: bytesUploaded,
+      bytes_deduped: bytesDeduped,
+    });
+    progress.finishRun();
 
-  const row = await runsDao.getRun(opts.db, runId);
-  if (!row) throw new Error(`run ${runId} vanished before we could read it back`);
-  return row;
+    const row = await runsDao.getRun(opts.db, runId);
+    if (!row) throw new Error(`run ${runId} vanished before we could read it back`);
+    return row;
+  } finally {
+    runControl.clear(runId);
+  }
 }
 
 async function loadFileState(

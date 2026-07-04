@@ -63,7 +63,7 @@ export async function runJobManual(
  * revoked mid-run, which surfaces as a `stat`-phase wholesale failure —
  * same posture as SAF revocation.
  */
-async function resolveWalker(job: JobRow): Promise<SourceWalker> {
+export async function resolveWalker(job: JobRow): Promise<SourceWalker> {
   if (job.source_kind === 'saf') return safWalker;
   if (job.source_kind === 'media') {
     const perm = await MediaLibrary.requestPermissionsAsync(false, ['photo', 'video']);

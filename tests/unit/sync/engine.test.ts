@@ -9,6 +9,7 @@ import { createServer } from '@/src/db/servers';
 import { runJob } from '@/src/sync/engine';
 import { dateSubdir } from '@/src/sync/path-organization';
 import { ProgressBus } from '@/src/sync/progress';
+import { isCancelRequested, requestCancel } from '@/src/sync/run-control';
 import type { SourceWalker, WalkerEntry } from '@/src/sync/walker/types';
 
 import { createTestDb } from '../db/adapter';
@@ -359,6 +360,93 @@ describe('engine.runJob', () => {
     expect(run.files_uploaded).toBe(2); // both "succeed"; one needed no bytes
     expect(run.bytes_uploaded).toBe(fresh.size); // only the fresh file's bytes
     expect(run.bytes_deduped).toBe(dup.size); // the pre-existing file was free
+  });
+
+  it('honors filterPaths: only listed paths are scanned and attempted', async () => {
+    const a = makeEntry('a.bin', 1000);
+    const b = makeEntry('b.bin', 1000);
+    const c = makeEntry('c.bin', 1000);
+    const server = makeFakeServer([a, b, c]);
+
+    const run = await runJob(
+      {
+        db,
+        walker: fakeWalker([a, b, c]),
+        client: server.client,
+        fileSource: makeFileSource([a, b, c]),
+        filterPaths: new Set([b.localPath]),
+        sleep: noSleep,
+      },
+      jobId,
+    );
+
+    expect(run.status).toBe('ok');
+    // Only the listed path survives the scan; the others aren't even counted.
+    expect(run.files_scanned).toBe(1);
+    expect(run.files_uploaded).toBe(1);
+    // One file → initial + re-handshake; if a/c had been attempted it'd be 6.
+    expect(server.handshakes).toBe(2);
+
+    const persisted = await db.getAllAsync<{ local_path: string }>(
+      'SELECT local_path FROM file_state WHERE job_id = ? ORDER BY local_path',
+      [jobId],
+    );
+    expect(persisted.map((r) => r.local_path)).toEqual([b.localPath]);
+  });
+
+  it('cancels mid-run: stops scheduling, finalizes as cancelled, clears registry', async () => {
+    // Pin concurrency to 1 so "later files are never touched" is deterministic.
+    await db.runAsync('UPDATE jobs SET max_concurrency = 1 WHERE id = ?', [jobId]);
+    const entries = [
+      makeEntry('a.bin', 1000),
+      makeEntry('b.bin', 1000),
+      makeEntry('c.bin', 1000),
+    ];
+    const server = makeFakeServer(entries);
+    const progress = new ProgressBus();
+
+    const base = makeFileSource(entries);
+    const hashedUris = new Set<string>();
+    const fileSource: FileSource = {
+      size: base.size,
+      async hashFileChunks(uri, chunksize) {
+        hashedUris.add(uri);
+        return base.hashFileChunks(uri, chunksize);
+      },
+      async readRange(uri, car, cdr) {
+        // While the first file is uploading, request cancel of this run. The
+        // worker pool checks between files, so the first file still completes
+        // and the rest are never pulled. runId is published by startRun.
+        if (uri === entries[0].uri) {
+          const runId = progress.getSnapshot().activeRun?.runId;
+          if (runId != null) requestCancel(runId);
+        }
+        return base.readRange(uri, car, cdr);
+      },
+    };
+
+    const run = await runJob(
+      {
+        db,
+        walker: fakeWalker(entries),
+        client: server.client,
+        fileSource,
+        progress,
+        sleep: noSleep,
+      },
+      jobId,
+    );
+
+    expect(run.status).toBe('cancelled');
+    // All three were discovered in the scan, but only the first was uploaded.
+    expect(run.files_scanned).toBe(3);
+    expect(run.files_uploaded).toBe(1);
+    expect(run.files_failed).toBe(0);
+    // The later files were never even hashed.
+    expect(hashedUris.has(entries[1].uri)).toBe(false);
+    expect(hashedUris.has(entries[2].uri)).toBe(false);
+    // The engine's `finally` clears the cancel registry entry.
+    expect(isCancelRequested(run.id)).toBe(false);
   });
 });
 

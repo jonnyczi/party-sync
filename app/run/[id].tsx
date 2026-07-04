@@ -1,13 +1,14 @@
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, FlatList, Pressable, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, Pressable, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { useSyncProgress } from '@/hooks/use-sync-progress';
 import { getJob } from '@/src/db/jobs';
 import { getRun, listRunErrors } from '@/src/db/runs';
 import { getServer } from '@/src/db/servers';
@@ -17,6 +18,7 @@ import type {
   RunRow,
   ServerRow,
 } from '@/src/db/types';
+import { retryRunFailures } from '@/src/sync/triggers/retry';
 
 interface LoadedRun {
   run: RunRow;
@@ -33,6 +35,8 @@ export default function RunDetailScreen() {
   const runId = Number(idParam);
   const [data, setData] = useState<LoadedRun | null>(null);
   const [notFound, setNotFound] = useState(false);
+  const [retrying, setRetrying] = useState(false);
+  const { activeRun } = useSyncProgress();
 
   useEffect(() => {
     if (!Number.isFinite(runId)) {
@@ -82,6 +86,19 @@ export default function RunDetailScreen() {
   const { run, job, server, errors } = data;
   const duration =
     run.finished_at !== null ? formatDuration(run.finished_at - run.started_at) : '…';
+  // Single-slot progress bus: a retry can't start while any run is active.
+  const retryDisabled = retrying || activeRun !== null;
+
+  const onRetry = () => {
+    setRetrying(true);
+    // Kick the retry off and navigate immediately: it runs via the foreground
+    // service + progress bus, so the job screen's ActiveRunPanel shows it live.
+    // The run continues regardless of this screen unmounting; we don't await it.
+    retryRunFailures(db, run.id).catch((e) => {
+      Alert.alert('Retry failed', e instanceof Error ? e.message : String(e));
+    });
+    router.push(`/job/${job.id}`);
+  };
 
   return (
     <ThemedView style={styles.container}>
@@ -120,6 +137,21 @@ export default function RunDetailScreen() {
               <ThemedText style={styles.dedupLine}>
                 {formatBytes(run.bytes_deduped)} saved via dedup
               </ThemedText>
+            ) : null}
+
+            {run.files_failed > 0 ? (
+              <Pressable
+                onPress={onRetry}
+                disabled={retryDisabled}
+                style={({ pressed }) => [
+                  styles.retryBtn,
+                  { opacity: retryDisabled ? 0.5 : pressed ? 0.8 : 1 },
+                ]}>
+                <IconSymbol name="arrow.clockwise" color="#fff" size={16} />
+                <ThemedText style={styles.retryBtnText}>
+                  {retrying ? 'Starting…' : `Retry failed (${run.files_failed})`}
+                </ThemedText>
+              </Pressable>
             ) : null}
 
             <Pressable
@@ -196,7 +228,9 @@ function StatusPill({ status }: { status: RunRow['status'] }) {
         ? '#d08900'
         : status === 'failed'
           ? '#c33'
-          : '#888';
+          : status === 'cancelled'
+            ? '#6c757d'
+            : '#888';
   return (
     <View style={[styles.pill, { backgroundColor: bg }]}>
       <ThemedText style={styles.pillText}>{status}</ThemedText>
@@ -243,6 +277,18 @@ const styles = StyleSheet.create({
   statLabel: { fontSize: 11, opacity: 0.7, marginTop: 2 },
   bytesLine: { opacity: 0.8, marginTop: 4 },
   dedupLine: { color: '#2a9d3f', fontSize: 13, marginTop: 2 },
+  retryBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: '#d08900',
+    borderRadius: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    marginTop: 12,
+  },
+  retryBtnText: { color: '#fff', fontWeight: '700' },
   openJobBtn: {
     flexDirection: 'row',
     alignItems: 'center',

@@ -48,8 +48,14 @@ export interface FileStateRow {
   uploaded_at: number | null;
 }
 
-export type RunTrigger = 'manual' | 'periodic' | 'observer';
-export type RunStatus = 'running' | 'ok' | 'partial' | 'failed' | 'skipped';
+export type RunTrigger = 'manual' | 'periodic' | 'observer' | 'retry';
+export type RunStatus =
+  | 'running'
+  | 'ok'
+  | 'partial'
+  | 'failed'
+  | 'skipped'
+  | 'cancelled';
 export type SkipReason =
   | 'wifi_only'
   | 'data_saver'

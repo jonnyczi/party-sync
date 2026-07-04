@@ -183,6 +183,23 @@ export async function listRunErrors(
   );
 }
 
+/**
+ * Distinct local paths of a run's per-file failures, for retry-failed. Excludes
+ * the run-level rows whose `local_path` is `''` (wholesale failures recorded by
+ * the engine), which aren't individual files to re-upload.
+ */
+export async function listRunFailedPaths(
+  db: SqliteDb,
+  runId: number,
+): Promise<string[]> {
+  const rows = await db.getAllAsync<{ local_path: string }>(
+    `SELECT DISTINCT local_path FROM run_errors
+     WHERE run_id = ? AND local_path <> '' ORDER BY local_path ASC`,
+    [runId],
+  );
+  return rows.map((r) => r.local_path);
+}
+
 export async function countRunErrors(
   db: SqliteDb,
   runId: number,

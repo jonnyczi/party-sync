@@ -55,6 +55,7 @@ import {
   nextPeriodicRunAt,
   PERIODIC_MIN_INTERVAL_MIN,
 } from '@/src/sync/scheduler';
+import { requestCancel } from '@/src/sync/run-control';
 import { syncPeriodicRegistration } from '@/src/sync/scheduler-register';
 import { runJobManual } from '@/src/sync/triggers/manual';
 import { MEDIA_SOURCE_ALL } from '@/src/sync/walker/media';
@@ -123,6 +124,13 @@ export default function JobEditScreen() {
   const progress = useSyncProgress();
   const activeRunHere =
     progress.activeRun && progress.activeRun.jobId === jobId ? progress.activeRun : null;
+  // `cancelling` shows "Cancelling…" after the tap; reset whenever the active
+  // run changes (incl. clears) so it doesn't carry over to the next run.
+  const [cancelling, setCancelling] = useState(false);
+  const activeRunIdHere = activeRunHere?.runId ?? null;
+  useEffect(() => {
+    setCancelling(false);
+  }, [activeRunIdHere]);
 
   useEffect(() => {
     listServers(db).then(setServers);
@@ -373,6 +381,14 @@ export default function JobEditScreen() {
       setStarting(false);
       refreshHistory();
     }
+  };
+
+  const onCancel = () => {
+    if (!activeRunHere) return;
+    setCancelling(true);
+    // Cooperative: the engine stops scheduling new files between uploads and
+    // finalizes the run as `cancelled`; the bus then clears `activeRun`.
+    requestCancel(activeRunHere.runId);
   };
 
   if (!loaded) {
@@ -706,6 +722,21 @@ export default function JobEditScreen() {
                 </Pressable>
 
                 {activeRunHere ? (
+                  <Pressable
+                    onPress={onCancel}
+                    disabled={cancelling}
+                    style={({ pressed }) => [
+                      styles.cancelBtn,
+                      { opacity: cancelling ? 0.6 : pressed ? 0.85 : 1 },
+                    ]}>
+                    <IconSymbol name="xmark.circle.fill" color="#fff" size={20} />
+                    <ThemedText style={styles.cancelBtnText}>
+                      {cancelling ? 'Cancelling…' : 'Cancel'}
+                    </ThemedText>
+                  </Pressable>
+                ) : null}
+
+                {activeRunHere ? (
                   <ActiveRunPanel run={activeRunHere} />
                 ) : (
                   <LastRunPanel run={latestRun} errors={latestErrors} />
@@ -901,7 +932,9 @@ function StatusDot({ status }: { status: RunRow['status'] }) {
           ? '#c33'
           : status === 'skipped'
             ? '#6a8caf'
-            : '#888';
+            : status === 'cancelled'
+              ? '#6c757d'
+              : '#888';
   return <View style={[styles.statusDot, { backgroundColor: color }]} />;
 }
 
@@ -1154,6 +1187,17 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   syncBtnText: { color: '#fff', fontWeight: '600', fontSize: 16 },
+  cancelBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 12,
+    borderRadius: 8,
+    backgroundColor: '#c33',
+    marginTop: 8,
+  },
+  cancelBtnText: { color: '#fff', fontWeight: '600', fontSize: 16 },
   panel: {
     gap: 6,
     padding: 12,
