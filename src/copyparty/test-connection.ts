@@ -102,7 +102,7 @@ export async function testJobConnection(
   return { remoteOk: true, localOk };
 }
 
-function mapError(e: unknown, remotePath: string): TestConnectionError {
+export function mapError(e: unknown, remotePath: string): TestConnectionError {
   if (e instanceof Up2kError && typeof e.httpStatus === 'number') {
     const s = e.httpStatus;
     if (s === 401)

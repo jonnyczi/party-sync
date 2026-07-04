@@ -15,12 +15,14 @@ import {
   View,
 } from 'react-native';
 
+import { RemotePathBrowser } from '@/components/remote-path-browser';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useSyncProgress } from '@/hooks/use-sync-progress';
+import { normalizeRemotePath } from '@/src/copyparty/paths';
 import { testJobConnection } from '@/src/copyparty/test-connection';
 import { createJob, deleteJob, getJob, updateJob } from '@/src/db/jobs';
 import {
@@ -41,13 +43,6 @@ import { syncPeriodicRegistration } from '@/src/sync/scheduler-register';
 import { runJobManual } from '@/src/sync/triggers/manual';
 import { MEDIA_SOURCE_ALL } from '@/src/sync/walker/media';
 
-function normalizeRemotePath(raw: string): string {
-  const trimmed = raw.trim();
-  if (!trimmed) return '';
-  const withSlash = trimmed.startsWith('/') ? trimmed : `/${trimmed}`;
-  return withSlash.replace(/\/+$/, '') || '/';
-}
-
 export default function JobEditScreen() {
   const { id: idParam } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
@@ -67,6 +62,11 @@ export default function JobEditScreen() {
   const [sourceKind, setSourceKind] = useState<SourceKind>('saf');
   const [sourceUri, setSourceUri] = useState('');
   const [remotePath, setRemotePath] = useState('');
+  const [browserVisible, setBrowserVisible] = useState(false);
+  const [browserConn, setBrowserConn] = useState<{
+    baseUrl: string;
+    password?: string;
+  } | null>(null);
   const [periodicEnabled, setPeriodicEnabled] = useState(false);
   const [periodicMinutes, setPeriodicMinutes] = useState(60);
   const [periodicMinutesText, setPeriodicMinutesText] = useState('60');
@@ -142,6 +142,15 @@ export default function JobEditScreen() {
         e instanceof Error ? e.message : 'SAF is Android-only — use a dev build on Android.',
       );
     }
+  };
+
+  const onBrowse = async () => {
+    if (serverId === null) return;
+    const server = servers.find((s) => s.id === serverId);
+    if (!server) return;
+    const pw = (await getServerPassword(serverId)) ?? undefined;
+    setBrowserConn({ baseUrl: server.base_url, password: pw });
+    setBrowserVisible(true);
   };
 
   // Switching source kind on the create screen wipes the source handle —
@@ -490,15 +499,46 @@ export default function JobEditScreen() {
           )}
 
           <Field label="Remote path">
-            <TextInput
-              value={remotePath}
-              onChangeText={setRemotePath}
-              placeholder="/phone-backups/camera"
-              placeholderTextColor={placeholder}
-              style={inputStyle}
-              autoCapitalize="none"
-              autoCorrect={false}
-            />
+            <View style={styles.remoteRow}>
+              <TextInput
+                value={remotePath}
+                onChangeText={setRemotePath}
+                placeholder="/phone-backups/camera"
+                placeholderTextColor={placeholder}
+                style={[inputStyle, styles.remoteInput]}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+              <Pressable
+                onPress={onBrowse}
+                disabled={serverId === null}
+                style={({ pressed }) => [
+                  styles.browseBtn,
+                  {
+                    borderColor:
+                      serverId === null ? Colors[scheme].icon : Colors[scheme].tint,
+                    opacity: pressed ? 0.7 : 1,
+                  },
+                ]}>
+                <IconSymbol
+                  name="folder.fill"
+                  color={serverId === null ? Colors[scheme].icon : Colors[scheme].tint}
+                  size={18}
+                />
+                <ThemedText
+                  style={{
+                    color: serverId === null ? Colors[scheme].icon : Colors[scheme].tint,
+                    fontWeight: '600',
+                  }}>
+                  Browse
+                </ThemedText>
+              </Pressable>
+            </View>
+            {serverId === null ? (
+              <ThemedText style={styles.hint}>
+                Select a server above to browse its folders.
+              </ThemedText>
+            ) : null}
           </Field>
 
           <SchedulePanel
@@ -611,6 +651,16 @@ export default function JobEditScreen() {
             </>
           ) : null}
         </ScrollView>
+        {browserConn ? (
+          <RemotePathBrowser
+            visible={browserVisible}
+            baseUrl={browserConn.baseUrl}
+            password={browserConn.password}
+            initialPath={normalizeRemotePath(remotePath) || '/'}
+            onClose={() => setBrowserVisible(false)}
+            onSelect={setRemotePath}
+          />
+        ) : null}
       </ThemedView>
     </KeyboardAvoidingView>
   );
@@ -858,6 +908,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
     fontSize: 16,
+  },
+  remoteRow: { flexDirection: 'row', alignItems: 'stretch', gap: 8 },
+  remoteInput: { flex: 1 },
+  browseBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 8,
+    paddingHorizontal: 14,
   },
   serverList: { gap: 8 },
   serverRow: {

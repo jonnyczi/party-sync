@@ -29,6 +29,9 @@ const MAPPING = {
   'xmark.circle.fill': 'cancel',
   'clock': 'schedule',
   'arrow.up.circle.fill': 'arrow-upward',
+  'lock.fill': 'lock',
+  'chevron.left': 'chevron-left',
+  'xmark': 'close',
 } as IconMapping;
 
 /**
