@@ -2,7 +2,7 @@
   "expo": {
     "name": "copyparty-client",
     "slug": "copyparty-client",
-    "version": "0.5.0",
+    "version": "0.6.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "copypartyclient",
@@ -22,7 +22,7 @@
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
       "package": "io.github.jonnyczi.copypartyclient",
-      "versionCode": 6,
+      "versionCode": 7,
       "permissions": [
         "FOREGROUND_SERVICE",
         "FOREGROUND_SERVICE_DATA_SYNC",
