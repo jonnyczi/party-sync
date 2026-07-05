@@ -1,8 +1,12 @@
 import { PermissionsAndroid, Platform } from 'react-native';
 
 /**
- * Ensure the app may post notifications, requesting POST_NOTIFICATIONS at
- * runtime if needed. Returns whether notifications are permitted.
+ * POST_NOTIFICATIONS state after (possibly) prompting:
+ * - 'granted': notifications may be posted.
+ * - 'denied': the user said no to this prompt — asking again later may work.
+ * - 'blocked': Android will never show the prompt again ("never ask again" /
+ *   denied twice); only the system settings page can change it now, so offer
+ *   the openNotificationSettings() shortcut instead of re-prompting.
  *
  * Uses React Native's built-in `PermissionsAndroid` rather than
  * `expo-notifications` so the app pulls in no Firebase/Google dependency — the
@@ -11,13 +15,22 @@ import { PermissionsAndroid, Platform } from 'react-native';
  * Android 13+ (API 33); older versions and non-Android platforms are permitted
  * implicitly.
  */
-export async function ensureNotificationPermission(): Promise<boolean> {
-  if (Platform.OS !== 'android') return true;
-  if (typeof Platform.Version === 'number' && Platform.Version < 33) return true;
+export type NotificationPermissionResult = 'granted' | 'denied' | 'blocked';
+
+export async function requestNotificationPermission(): Promise<NotificationPermissionResult> {
+  if (Platform.OS !== 'android') return 'granted';
+  if (typeof Platform.Version === 'number' && Platform.Version < 33) return 'granted';
 
   const perm = PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS;
-  if (await PermissionsAndroid.check(perm)) return true;
+  if (await PermissionsAndroid.check(perm)) return 'granted';
 
   const result = await PermissionsAndroid.request(perm);
-  return result === PermissionsAndroid.RESULTS.GRANTED;
+  if (result === PermissionsAndroid.RESULTS.GRANTED) return 'granted';
+  if (result === PermissionsAndroid.RESULTS.NEVER_ASK_AGAIN) return 'blocked';
+  return 'denied';
+}
+
+/** Boolean convenience for callers that only care whether posting works. */
+export async function ensureNotificationPermission(): Promise<boolean> {
+  return (await requestNotificationPermission()) === 'granted';
 }

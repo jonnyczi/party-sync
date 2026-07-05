@@ -1,6 +1,5 @@
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
 import { Stack } from 'expo-router';
-import * as SQLite from 'expo-sqlite';
 import { SQLiteProvider, useSQLiteContext } from 'expo-sqlite';
 import { StatusBar } from 'expo-status-bar';
 import { Suspense, useEffect } from 'react';
@@ -8,30 +7,22 @@ import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import 'react-native-reanimated';
 
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { DB_NAME } from '@/src/db/name';
 import { reconcileInterruptedRuns } from '@/src/db/runs';
-import { configureConnection, runMigrations } from '@/src/db/schema';
+import { runMigrations } from '@/src/db/schema';
+import { clearStaleSyncState } from '@/src/sync/foreground';
 import { defaultProgressBus } from '@/src/sync/progress';
-import {
-  definePeriodicTask,
-  syncPeriodicRegistration,
-} from '@/src/sync/scheduler-register';
+import { syncPeriodicRegistration } from '@/src/sync/scheduler-register';
 
 export const unstable_settings = {
   anchor: '(tabs)',
 };
 
-const DB_NAME = 'copyparty-client.db';
-
-// The background task must be defined at module load — TaskManager needs
-// it registered before any periodic invocation can dispatch, and
-// WorkManager can fire while no React tree is mounted. Each invocation
-// opens its own DB handle since the in-process SQLiteProvider may not be
-// alive.
-definePeriodicTask(async () => {
-  const db = await SQLite.openDatabaseAsync(DB_NAME);
-  await configureConnection(db);
-  return db;
-});
+// NOTE: definePeriodicTask deliberately does NOT live here. Route modules
+// only execute when the router renders; a headless WorkManager cold start
+// never mounts a surface, so module-scope setup in a route file silently
+// doesn't run. The task is defined in src/sync/headless-entry.ts, imported
+// first from the bundle entry (index.ts).
 
 function LoadingScreen() {
   return (
@@ -50,6 +41,11 @@ function PeriodicRegistrar() {
     if (defaultProgressBus.getSnapshot().activeRun === null) {
       reconcileInterruptedRuns(db).catch((e) => {
         console.warn('[copyparty] reconcileInterruptedRuns failed', e);
+      });
+      // A process killed mid-run never reaches the finally that stops the
+      // foreground service / dismisses the "Syncing…" notification.
+      clearStaleSyncState().catch((e) => {
+        console.warn('[copyparty] clearStaleSyncState failed', e);
       });
     }
     syncPeriodicRegistration(db).catch((e) => {
@@ -81,6 +77,10 @@ export default function RootLayout() {
             />
             <Stack.Screen name="run/[id]" options={{ title: 'Run' }} />
             <Stack.Screen name="settings" options={{ title: 'Settings' }} />
+            <Stack.Screen
+              name="background-sync"
+              options={{ title: 'Background sync' }}
+            />
             <Stack.Screen
               name="backup"
               options={{ title: 'Backup & restore', presentation: 'modal' }}

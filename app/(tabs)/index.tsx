@@ -12,6 +12,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { RunProgress, phaseLabel } from '@/components/run-progress';
+import { SyncHealthCard } from '@/components/sync-health-card';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { IconSymbol } from '@/components/ui/icon-symbol';
@@ -30,6 +31,7 @@ import {
 import { listServers } from '@/src/db/servers';
 import type { JobRow, RunRow, ServerRow } from '@/src/db/types';
 import { basename, formatBytes, formatRelativeTime } from '@/src/format';
+import { readSyncHealth } from '@/src/sync/health';
 import { requestCancel } from '@/src/sync/run-control';
 import {
   aggregateRuns,
@@ -57,6 +59,7 @@ export default function HomeScreen() {
   );
   const [recentErrors, setRecentErrors] = useState<RecentErrorRow[]>([]);
   const [refreshing, setRefreshing] = useState(false);
+  const [healthBlockedCount, setHealthBlockedCount] = useState(0);
 
   const refresh = useCallback(async () => {
     const now = Date.now();
@@ -84,6 +87,13 @@ export default function HomeScreen() {
   useFocusEffect(
     useCallback(() => {
       refresh().catch((e) => console.warn('dashboard refresh failed', e));
+      // Native-probe pass for the background-sync warning card; independent of
+      // the DB refresh so a probe failure can't block the dashboard.
+      readSyncHealth()
+        .then((items) =>
+          setHealthBlockedCount(items.filter((i) => i.status === 'blocked').length),
+        )
+        .catch((e) => console.warn('health probe failed', e));
     }, [refresh]),
   );
 
@@ -178,6 +188,13 @@ export default function HomeScreen() {
         ) : null}
 
         {hasAnyBytes ? <BytesOverTime buckets={buckets} /> : null}
+
+        {healthBlockedCount > 0 && jobs.some((j) => j.periodic_enabled === 1) ? (
+          <SyncHealthCard
+            blockedCount={healthBlockedCount}
+            onOpen={() => router.push('/background-sync')}
+          />
+        ) : null}
 
         {jobs.length > 0 ? (
           <HealthStrip

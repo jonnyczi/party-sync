@@ -12,7 +12,8 @@ import {
   getResultNotificationsEnabled,
   setResultNotificationsEnabled,
 } from '@/src/db/settings';
-import { ensureNotificationPermission } from '@/src/sync/notify-permission';
+import CopypartySync from '@/modules/copyparty-sync';
+import { requestNotificationPermission } from '@/src/sync/notify-permission';
 
 /**
  * App-wide settings, reached via the gear in the Dashboard header. Holds
@@ -42,11 +43,24 @@ export default function SettingsScreen() {
         return;
       }
       try {
-        const granted = await ensureNotificationPermission();
-        if (!granted) {
+        const perm = await requestNotificationPermission();
+        if (perm !== 'granted') {
+          // 'blocked' means Android will never re-prompt — only the system
+          // settings page can flip it, so offer the shortcut.
           Alert.alert(
             'Notifications disabled',
             'Allow notifications for copyparty in system settings to get sync result alerts.',
+            perm === 'blocked'
+              ? [
+                  { text: 'Not now', style: 'cancel' },
+                  {
+                    text: 'Open settings',
+                    onPress: () => {
+                      CopypartySync?.openNotificationSettings().catch(() => {});
+                    },
+                  },
+                ]
+              : undefined,
           );
           setNotifyEnabled(false);
           await setResultNotificationsEnabled(db, false);
@@ -77,6 +91,30 @@ export default function SettingsScreen() {
           </View>
           <Switch value={notifyEnabled} onValueChange={onToggleNotify} />
         </View>
+      </View>
+
+      <View style={styles.section}>
+        <ThemedText type="subtitle">Sync</ThemedText>
+        <Pressable
+          onPress={() => router.push('/background-sync')}
+          style={({ pressed }) => [
+            styles.navRow,
+            { borderColor: Colors[scheme].border, opacity: pressed ? 0.6 : 1 },
+          ]}
+          accessibilityLabel="Background sync setup">
+          <IconSymbol
+            name="arrow.triangle.2.circlepath"
+            color={Colors[scheme].tint}
+            size={20}
+          />
+          <View style={{ flex: 1, gap: 2 }}>
+            <ThemedText type="defaultSemiBold">Background sync</ThemedText>
+            <ThemedText style={styles.rowSub}>
+              Check device settings that can block scheduled syncs.
+            </ThemedText>
+          </View>
+          <IconSymbol name="chevron.right" color={Colors[scheme].icon} size={18} />
+        </Pressable>
       </View>
 
       <View style={styles.section}>

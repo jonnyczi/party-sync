@@ -38,7 +38,9 @@ import { listServers } from '@/src/db/servers';
 import type { PathOrganization, ServerRow, SourceKind } from '@/src/db/types';
 import { listMediaAlbums, type AlbumOption } from '@/src/media/albums';
 import { getServerPassword } from '@/src/storage/secrets';
-import { ensureNotificationPermission } from '@/src/sync/notify-permission';
+import CopypartySync from '@/modules/copyparty-sync';
+import { hasBlockedItem, readSyncHealth } from '@/src/sync/health';
+import { requestNotificationPermission } from '@/src/sync/notify-permission';
 import { dateSubdir, PATH_ORGANIZATIONS } from '@/src/sync/path-organization';
 import {
   nextPeriodicRunAt,
@@ -246,24 +248,54 @@ export function JobForm({ jobId }: { jobId: number | null }) {
     }
   };
 
-  // Toggling periodic on requires POST_NOTIFICATIONS (Android 13+) so the
-  // foreground-service notification can actually be posted during ticks.
-  // Ask lazily here; if denied, revert the toggle and explain why.
+  // Toggling periodic on asks for POST_NOTIFICATIONS (Android 13+) so sync
+  // progress/results are visible, then runs the background-sync health probes
+  // and walks the user into the checklist if anything would block scheduled
+  // syncs. A plain permission denial reverts the toggle (the user just said
+  // no); a 'blocked' permission can only be fixed in system settings, so the
+  // toggle stays on — syncs run fine without notifications, just invisibly.
   const onTogglePeriodic = async (next: boolean) => {
     if (!next) {
       setPeriodicEnabled(false);
       return;
     }
     try {
-      const granted = await ensureNotificationPermission();
-      if (!granted) {
+      const perm = await requestNotificationPermission();
+      if (perm === 'denied') {
         Alert.alert(
           'Notifications required',
-          'Periodic background sync needs notification permission so the app can keep syncing under Android battery limits. Enable notifications for copyparty and try again.',
+          'Periodic background sync posts a notification while it runs so you can see progress and failures. Allow notifications for copyparty and try again.',
         );
         return;
       }
+      if (perm === 'blocked') {
+        Alert.alert(
+          'Notifications are off',
+          'Scheduled syncs will still run, but progress and failures will be invisible. Enable notifications for copyparty in system settings.',
+          [
+            { text: 'Not now', style: 'cancel' },
+            {
+              text: 'Open settings',
+              onPress: () => {
+                CopypartySync?.openNotificationSettings().catch(() => {});
+              },
+            },
+          ],
+        );
+      }
       setPeriodicEnabled(true);
+
+      const health = await readSyncHealth();
+      if (hasBlockedItem(health)) {
+        Alert.alert(
+          'Background sync needs setup',
+          'Device settings will currently block scheduled syncs from running while the app is closed. Review them now?',
+          [
+            { text: 'Not now', style: 'cancel' },
+            { text: 'Review', onPress: () => router.push('/background-sync') },
+          ],
+        );
+      }
     } catch (e) {
       Alert.alert(
         'Could not enable periodic sync',
@@ -813,7 +845,8 @@ function SchedulePanel(props: {
             <View style={{ flex: 1 }}>
               <ThemedText>Respect Data Saver</ThemedText>
               <ThemedText style={styles.hint}>
-                Best-effort detection; improving soon.
+                Skip scheduled syncs while Android&apos;s Data Saver restricts
+                background data.
               </ThemedText>
             </View>
             <Switch

@@ -1,6 +1,8 @@
 import * as Battery from 'expo-battery';
 import * as Network from 'expo-network';
 
+import CopypartySync from '../../modules/copyparty-sync';
+
 import type { ConstraintState } from './constraints';
 
 /**
@@ -9,11 +11,10 @@ import type { ConstraintState } from './constraints';
  * node (no native modules), so the split keeps `evaluateConstraints` unit-
  * testable and this module the single integration surface.
  *
- * Data Saver detection is intentionally stubbed to `false` in PR 6a —
- * honoring it correctly needs `ConnectivityManager.getRestrictBackgroundStatus()`
- * through a native binding, which lands in PR 6b. The schema, UI, and
- * `evaluateConstraints` all respect the toggle today; `respect_data_saver`
- * is simply a no-op on device until the probe arrives.
+ * Data Saver comes from `ConnectivityManager.getRestrictBackgroundStatus()`
+ * via modules/copyparty-sync. Only the 'enabled' state gates syncing —
+ * 'whitelisted' means the user explicitly allowed this app unrestricted data,
+ * so `respect_data_saver` jobs may proceed.
  */
 export async function readConstraintState(): Promise<ConstraintState> {
   const [netState, batteryState] = await Promise.all([
@@ -28,7 +29,7 @@ export async function readConstraintState(): Promise<ConstraintState> {
 
   return {
     networkType,
-    isDataSaverOn: false,
+    isDataSaverOn: CopypartySync?.getDataSaverStatus() === 'enabled',
     isCharging,
   };
 }

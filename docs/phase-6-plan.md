@@ -391,18 +391,20 @@ Verifications (screenshot each):
 
 Out of scope for 6a, tracked here so the split is explicit:
 
-- **Data Saver native probe** — Kotlin module calling
-  `ConnectivityManager.getRestrictBackgroundStatus()` behind a thin JS
-  binding; plugs into `readConstraintState()`.
+- ~~**Data Saver native probe**~~ — DONE 2026-07-04
+  (`feat/background-sync-reliability`): `modules/copyparty-sync`
+  `getDataSaverStatus()` via `ConnectivityManager.getRestrictBackgroundStatus()`,
+  wired into `readConstraintState()`.
 - **Notification content polish** — phase-aware ticker body ("Uploading
   12/234: camera_roll/IMG_0001.jpg"), rolled-up format when >1 eligible
   job ("Syncing 3 jobs · currently Camera backup").
 - **Tap-to-deep-link** — notification tap routes to `/job/{id}` when 1
   job running, `/(tabs)/index.tsx` otherwise. Uses
   `Notifications.addNotificationResponseReceivedListener`.
-- **Dashboard skipped-run UX** — chip + reason surfacing in recent runs;
-  possibly a "hasn't synced in X days" banner when the latest N runs are
-  all skipped.
+- ~~**Dashboard skipped-run UX**~~ — DONE 2026-07-04
+  (`feat/background-sync-reliability`): `skipReasonLabel()` shown in job
+  run history + last-run summary; the "why isn't it syncing" banner became
+  the dashboard background-sync health card.
 - **Emulator-reboot test rigor** — scripted adb reboot sequence with
   expected-state assertions.
 

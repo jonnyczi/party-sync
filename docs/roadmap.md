@@ -9,7 +9,14 @@ Status legend: 🟢 done · 🟡 partially done / blocked on a prerequisite · �
 
 ---
 
-## 1. Cleartext-HTTP blocked in release builds 🟡 (highest user impact)
+## 1. Cleartext-HTTP blocked in release builds 🟢 (fixed & verified)
+
+**Resolved** by `plugins/withCleartextTraffic.js` (`usesCleartextTraffic=true`,
+shipped v0.1.0) and re-verified at runtime during the 2026-07-04/05
+background-sync verification sessions: release APKs sync fine against the plain
+`http://` dockerized copyparty. Original notes kept below for context.
+
+## 1a. (original notes) Cleartext-HTTP blocked in release builds
 
 **Symptom.** A **release** APK can't talk to plain `http://` copyparty servers:
 every request fails with **"Network request failed"** (e.g. "5 scanned, 0
@@ -94,8 +101,33 @@ merge request.)
 
 ---
 
+## Deferred: copyparty handshake 422 on partial-upload dedup collision ⚪
+
+up2k dedups by content hash server-wide. When the only server-side copy of some
+content is a **partial** upload (left behind by an interrupted run), uploading
+identical content to any *other* folder fails `handshake 422` — and retries fail
+identically forever. Surfaced nicely in the run UI, but there is no recovery.
+Deliberately deferred from the background-sync-reliability branch (2026-07-04):
+needs copyparty protocol research (a dedup-bypass/force flag on handshake, or
+detect-and-resume of the partial in its original location) and possibly an
+upstream issue. Repro + evidence in the 2026-07-04 verification session
+(`tmp/background-sync-verification-report.md`, defect 6). The foreground-service
+work makes stranded partials much rarer, so severity is reduced.
+
+---
+
 ## Done (for context) 🟢
 
+- **Background sync reliability + setup guidance** (2026-07-04,
+  `feat/background-sync-reliability`): real dataSync foreground service + wake
+  lock + RN headless keep-alive around every run (swipe-away and screen-off
+  safe); custom WorkManager worker replaces expo-background-task
+  (`setForeground` before JS, task defined in the bundle entry `index.ts` —
+  route modules never execute headless, liveness watchdog for wedged headless
+  spawns); health checklist screen (`/background-sync`) + dashboard card +
+  job-form interception with one-tap fixes incl. the
+  `ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` dialog; Data Saver probe
+  un-stubbed; notification permission asked at first manual run.
 - Reproducible Dagger release build (APK/AAB) in a `nixos/nix` container; only
   Docker needed locally. `lint` / `test` / `build-apk` / `build-aab`.
 - GitHub Actions: `ci.yml` (lint+test always; heavy build on PR/dispatch) and

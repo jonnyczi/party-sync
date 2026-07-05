@@ -108,6 +108,16 @@ Expo Router app (React Native 0.81 + React 19 + Expo SDK 54) targeting iOS, Andr
 
 ## Notes
 
+- **Custom bundle entry**: `package.json` `main` is `index.ts` (not
+  `expo-router/entry`). It imports `src/sync/headless-entry.ts` FIRST — the
+  periodic background task must be defined during plain bundle evaluation
+  because route modules (e.g. `app/_layout.tsx`) only execute when the router
+  renders, and a headless WorkManager cold start never mounts a surface. Never
+  move task/AppRegistry setup into a route file.
+- **Background sync natives** live in `modules/copyparty-sync` (dataSync
+  foreground service + wake lock, RN headless keep-alive, the periodic
+  WorkManager worker with a JS-liveness watchdog, device probes, settings
+  intents). Like `copyparty-notify` it is androidx-only — no Firebase/GMS.
 - TypeScript `strict` is on and extends `expo/tsconfig.base`.
 - Assets live in `assets/images/` and are referenced from `app.json` (icons, splash, favicon).
 - The current `app/` tree is Expo's default starter (Home/Explore tabs, parallax scroll demo, modal). If the user starts building real features, expect the starter screens to be replaced rather than extended.

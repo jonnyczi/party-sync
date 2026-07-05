@@ -1,0 +1,31 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'expo.modules.copypartysync'
+version = '1.0.0'
+
+android {
+  namespace "expo.modules.copypartysync"
+  defaultConfig {
+    versionCode 1
+    versionName "1.0.0"
+  }
+  lintOptions {
+    abortOnError false
+  }
+}
+
+dependencies {
+  // Foreground service + notifications live entirely in androidx.core — no
+  // Google Play Services / Firebase (F-Droid clean, same rule as
+  // modules/copyparty-notify).
+  implementation 'androidx.core:core-ktx:1.13.1'
+  // For HeadlessJsTaskContext (keep-alive). Version is substituted by the
+  // React Native gradle plugin, same pattern as expo-background-task.
+  implementation 'com.facebook.react:react-android'
+  // Periodic tick scheduling. 2.10.x handles Android 15's Service.onTimeout
+  // for its SystemForegroundService (the dataSync FGS budget).
+  implementation 'androidx.work:work-runtime-ktx:2.10.1'
+}

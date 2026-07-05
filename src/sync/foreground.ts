@@ -1,6 +1,9 @@
 import { Platform } from 'react-native';
 
 import CopypartyNotify from '../../modules/copyparty-notify';
+import CopypartySync from '../../modules/copyparty-sync';
+
+import { acquireKeepAlive, releaseKeepAlive } from './keep-alive';
 
 const CHANNEL_ID = 'copyparty-sync';
 // NotificationManagerCompat keys notifications by integer id; one fixed slot for
@@ -12,9 +15,8 @@ let channelReady = false;
 /**
  * Idempotent channel setup. Android requires a channel before a notification
  * can be posted. iOS/web have no native module (it's Android-only) so the
- * import resolves to null and every call here no-ops. Importance LOW — we want
- * the notification visible (so Android treats the app as foregrounded during a
- * WorkManager-triggered run) but silent and unobtrusive.
+ * import resolves to null and every call here no-ops. Importance LOW — the
+ * notification should be visible but silent and unobtrusive.
  *
  * Notifications go through `modules/copyparty-notify` (androidx.core only)
  * rather than `expo-notifications`, whose Android build pulls in Firebase
@@ -54,27 +56,70 @@ async function dismissSyncNotification(): Promise<void> {
 }
 
 /**
- * Run `fn` with a persistent "Syncing…" notification posted for its duration.
- * The ongoing notification is what keeps the app process alive under Doze /
- * WorkManager and is also the user-visible affordance during manual runs.
- * Notification clears in `finally` — caller doesn't need to handle it.
+ * Run `fn` under a real dataSync foreground service (ongoing notification +
+ * partial wake lock, via modules/copyparty-sync) plus an RN headless
+ * keep-alive task. The service keeps the *process* alive through swipe-away
+ * and the CPU awake with the screen off; the keep-alive task keeps the *JS
+ * world* executing once the last Activity is gone (RN suspends it otherwise —
+ * verified: uploads froze at swipe with the service running). Both are torn
+ * down in `finally` — caller doesn't need to handle them.
  *
- * Failures to post/dismiss are swallowed; the sync itself must not fail because
- * a notification couldn't be shown (user may have denied POST_NOTIFICATIONS).
- * We log and keep going.
+ * When the service can't start (Android refused a background start without an
+ * exemption, or the module is unavailable off-Android) we fall back to the old
+ * plain ongoing notification: the run still executes best-effort, exactly as
+ * before. Failures on the notification path are swallowed too — the sync
+ * itself must not fail because a notification couldn't be shown (user may have
+ * denied POST_NOTIFICATIONS). We log and keep going.
  */
 export async function withForegroundService<T>(
   jobName: string,
   fn: () => Promise<T>,
 ): Promise<T> {
+  let serviceStarted = false;
   try {
-    await showSyncNotification(jobName);
+    if (Platform.OS === 'android' && CopypartySync) {
+      serviceStarted = await CopypartySync.startForegroundSync(
+        'copyparty',
+        `Syncing: ${jobName}`,
+      );
+    }
+    if (!serviceStarted) {
+      await showSyncNotification(jobName);
+    }
   } catch (e) {
-    console.warn('[copyparty] foreground notification post failed', e);
+    console.warn('[copyparty] foreground start failed', e);
   }
+  // Even without the service (start refused / fallback path) the keep-alive
+  // still helps for as long as the process survives.
+  await acquireKeepAlive();
   try {
     return await fn();
   } finally {
+    releaseKeepAlive();
+    if (serviceStarted) {
+      try {
+        await CopypartySync!.stopForegroundSync();
+      } catch (e) {
+        console.warn('[copyparty] foreground service stop failed', e);
+      }
+    }
+    // Covers the fallback path; also harmlessly re-clears the service's slot
+    // (same NOTIF_ID) when the service owned the notification.
     await dismissSyncNotification();
   }
+}
+
+/**
+ * Startup cleanup for state a killed process left behind: a stale "Syncing…"
+ * notification and/or an orphaned foreground service. Called next to
+ * reconcileInterruptedRuns, and like it, only when no run is genuinely active.
+ */
+export async function clearStaleSyncState(): Promise<void> {
+  if (Platform.OS !== 'android') return;
+  try {
+    await CopypartySync?.stopForegroundSync();
+  } catch (e) {
+    console.warn('[copyparty] stale service stop failed', e);
+  }
+  await dismissSyncNotification();
 }

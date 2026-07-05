@@ -32,6 +32,25 @@ export function statusColor(status: RunStatus, scheme: Scheme): string {
   }
 }
 
+/**
+ * Human-readable reason a run was skipped — closes the "silently skipped"
+ * loop: the DB has stored skip_reason since phase 6, but no screen showed it.
+ */
+export function skipReasonLabel(reason: string): string {
+  switch (reason) {
+    case 'wifi_only':
+      return 'waiting for Wi-Fi';
+    case 'data_saver':
+      return 'Data Saver on';
+    case 'charging_only':
+      return 'waiting for charger';
+    case 'already_running':
+      return 'another sync was running';
+    default:
+      return reason;
+  }
+}
+
 /** Human-readable label for a run status (used by pills/summaries). */
 export function statusLabel(status: RunStatus): string {
   switch (status) {

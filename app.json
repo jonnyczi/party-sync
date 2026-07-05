@@ -27,7 +27,9 @@
         "FOREGROUND_SERVICE",
         "FOREGROUND_SERVICE_DATA_SYNC",
         "POST_NOTIFICATIONS",
-        "ACCESS_NETWORK_STATE"
+        "ACCESS_NETWORK_STATE",
+        "WAKE_LOCK",
+        "REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"
       ]
     },
     "plugins": [
@@ -58,7 +60,6 @@
           ]
         }
       ],
-      "expo-background-task",
       "./plugins/withReleaseSigning",
       "./plugins/withCleartextTraffic",
       "expo-font",

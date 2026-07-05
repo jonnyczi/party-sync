@@ -25,6 +25,7 @@ import { deleteJob, listJobs } from '@/src/db/jobs';
 import { listServers } from '@/src/db/servers';
 import { getLatestRunForJob } from '@/src/db/runs';
 import type { JobRow, RunRow, ServerRow } from '@/src/db/types';
+import { ensureNotificationPermission } from '@/src/sync/notify-permission';
 import { runJobManual } from '@/src/sync/triggers/manual';
 import {
   requestCancelAll,
@@ -121,8 +122,13 @@ export default function JobsScreen() {
   const onSyncRow = (row: JobRowView) => {
     if (activeRun || batch || startingJobId !== null) return;
     setStartingJobId(row.job.id);
-    // Resolves when the run finishes; live state comes from the progress bus.
-    runJobManual(db, row.job.id)
+    // Ask for notification permission on the first manual run so progress and
+    // results are visible; the run itself never depends on the outcome
+    // (resolves instantly once the permission state is settled).
+    ensureNotificationPermission()
+      .catch(() => {})
+      // Resolves when the run finishes; live state comes from the progress bus.
+      .then(() => runJobManual(db, row.job.id))
       .catch((e) => {
         Alert.alert('Sync failed', e instanceof Error ? e.message : String(e));
       })
@@ -139,9 +145,12 @@ export default function JobsScreen() {
 
   const onSyncAll = () => {
     if (anyBusy || !hasRunnableJob) return;
-    // Resolves when the whole batch finishes; live state comes from the
-    // sync-all + progress buses.
-    runAllJobsManual(db)
+    // Same first-run notification ask as onSyncRow; outcome never gates runs.
+    ensureNotificationPermission()
+      .catch(() => {})
+      // Resolves when the whole batch finishes; live state comes from the
+      // sync-all + progress buses.
+      .then(() => runAllJobsManual(db))
       .then((res) => {
         if (res.failedToStart.length > 0) {
           Alert.alert(

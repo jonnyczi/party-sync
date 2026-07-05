@@ -14,7 +14,7 @@ import { RunProgress, phaseLabel } from '@/components/run-progress';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { IconSymbol } from '@/components/ui/icon-symbol';
-import { statusColor } from '@/constants/status-colors';
+import { skipReasonLabel, statusColor } from '@/constants/status-colors';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useSyncProgress } from '@/hooks/use-sync-progress';
@@ -25,6 +25,7 @@ import type { JobRow, RunErrorRow, RunRow, ServerRow } from '@/src/db/types';
 import { basename, formatBytes } from '@/src/format';
 import { requestCancel } from '@/src/sync/run-control';
 import { nextPeriodicRunAt } from '@/src/sync/scheduler';
+import { ensureNotificationPermission } from '@/src/sync/notify-permission';
 import { runJobManual } from '@/src/sync/triggers/manual';
 
 /**
@@ -103,6 +104,8 @@ export default function JobOverviewScreen() {
     if (starting || anyRunActive) return;
     setStarting(true);
     try {
+      // First-manual-run notification ask; outcome never gates the run.
+      await ensureNotificationPermission().catch(() => {});
       await runJobManual(db, jobId);
     } catch (e) {
       Alert.alert('Sync failed', e instanceof Error ? e.message : String(e));
@@ -285,8 +288,9 @@ export default function JobOverviewScreen() {
                   {new Date(r.started_at).toLocaleString()} · {r.status}
                 </ThemedText>
                 <ThemedText style={styles.runSub}>
-                  {r.files_uploaded} uploaded · {r.files_skipped} skipped ·{' '}
-                  {r.files_failed} failed
+                  {r.status === 'skipped' && r.skip_reason
+                    ? skipReasonLabel(r.skip_reason)
+                    : `${r.files_uploaded} uploaded · ${r.files_skipped} skipped · ${r.files_failed} failed`}
                 </ThemedText>
               </View>
               <IconSymbol name="chevron.right" color={Colors[scheme].icon} size={16} />
@@ -318,6 +322,11 @@ function LastRunSummary({ run, errors }: { run: RunRow | null; errors: RunErrorR
           · {new Date(run.started_at).toLocaleString()}
         </ThemedText>
       </View>
+      {run.status === 'skipped' && run.skip_reason ? (
+        <ThemedText style={styles.muted}>
+          Skipped: {skipReasonLabel(run.skip_reason)}
+        </ThemedText>
+      ) : null}
       <ThemedText style={styles.muted}>
         {run.files_scanned} scanned, {run.files_uploaded} uploaded,{' '}
         {run.files_skipped} skipped, {run.files_failed} failed (

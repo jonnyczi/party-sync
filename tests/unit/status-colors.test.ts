@@ -6,7 +6,7 @@ vi.mock('react-native', () => ({
   Platform: { select: (o: Record<string, unknown>) => o.default },
 }));
 
-import { statusColor } from '@/constants/status-colors';
+import { skipReasonLabel, statusColor } from '@/constants/status-colors';
 import { Colors } from '@/constants/theme';
 
 describe('statusColor', () => {
@@ -28,5 +28,18 @@ describe('statusColor', () => {
     expect(Colors.dark.accent).not.toBe('#fff');
     expect(Colors.dark.onAccent).toBe('#fff');
     expect(Colors.light.accent).not.toBe(Colors.light.background);
+  });
+});
+
+describe('skipReasonLabel', () => {
+  it('maps every known skip reason to user-facing copy', () => {
+    expect(skipReasonLabel('wifi_only')).toBe('waiting for Wi-Fi');
+    expect(skipReasonLabel('data_saver')).toBe('Data Saver on');
+    expect(skipReasonLabel('charging_only')).toBe('waiting for charger');
+    expect(skipReasonLabel('already_running')).toBe('another sync was running');
+  });
+
+  it('passes unknown reasons through verbatim', () => {
+    expect(skipReasonLabel('some_future_reason')).toBe('some_future_reason');
   });
 });
