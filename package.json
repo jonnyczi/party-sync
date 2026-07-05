@@ -1,7 +1,7 @@
 {
   "name": "copyparty-client",
   "main": "expo-router/entry",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "license": "MIT",
   "scripts": {
     "start": "expo start",
