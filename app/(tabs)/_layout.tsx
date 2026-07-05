@@ -33,10 +33,12 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
-        name="settings"
+        name="servers"
         options={{
-          title: 'Settings',
-          tabBarIcon: ({ color }) => <IconSymbol size={28} name="gearshape.fill" color={color} />,
+          title: 'Servers',
+          tabBarIcon: ({ color }) => (
+            <IconSymbol size={28} name="externaldrive.fill" color={color} />
+          ),
         }}
       />
     </Tabs>

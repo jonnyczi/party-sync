@@ -60,7 +60,9 @@
       ],
       "expo-background-task",
       "./plugins/withReleaseSigning",
-      "./plugins/withCleartextTraffic"
+      "./plugins/withCleartextTraffic",
+      "expo-font",
+      "expo-web-browser"
     ],
     "experiments": {
       "typedRoutes": true,

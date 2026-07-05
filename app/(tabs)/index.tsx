@@ -1,24 +1,35 @@
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, Pressable, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
+import {
+  Alert,
+  Pressable,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  View,
+} from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { RunProgress, phaseLabel } from '@/components/run-progress';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { statusColor } from '@/constants/status-colors';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
-import { formatEta, formatRate, useEta } from '@/hooks/use-eta';
+import { useSyncAll } from '@/hooks/use-sync-all';
 import { useSyncProgress } from '@/hooks/use-sync-progress';
 import { listJobs } from '@/src/db/jobs';
 import {
+  getLatestRunForJob,
   listRecentErrors,
   listRunsSince,
   type RecentErrorRow,
 } from '@/src/db/runs';
 import { listServers } from '@/src/db/servers';
 import type { JobRow, RunRow, ServerRow } from '@/src/db/types';
+import { basename, formatBytes, formatRelativeTime } from '@/src/format';
 import { requestCancel } from '@/src/sync/run-control';
 import {
   aggregateRuns,
@@ -35,11 +46,15 @@ export default function HomeScreen() {
   const db = useSQLiteContext();
   const router = useRouter();
   const scheme = useColorScheme() ?? 'light';
+  const insets = useSafeAreaInsets();
   const progress = useSyncProgress();
   const activeRun = progress.activeRun;
   const [jobs, setJobs] = useState<JobRow[]>([]);
   const [servers, setServers] = useState<ServerRow[]>([]);
   const [runs, setRuns] = useState<RunRow[]>([]);
+  const [latestByJob, setLatestByJob] = useState<Map<number, RunRow | null>>(
+    new Map(),
+  );
   const [recentErrors, setRecentErrors] = useState<RecentErrorRow[]>([]);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -51,9 +66,18 @@ export default function HomeScreen() {
       listRunsSince(db, now - HISTORY_WINDOW_MS),
       listRecentErrors(db, 10),
     ]);
+    // The health strip needs each job's true latest run, which can be older
+    // than the 7-day window `runs` covers.
+    const latest = new Map<number, RunRow | null>();
+    await Promise.all(
+      js.map(async (j) => {
+        latest.set(j.id, await getLatestRunForJob(db, j.id));
+      }),
+    );
     setJobs(js);
     setServers(ss);
     setRuns(rs);
+    setLatestByJob(latest);
     setRecentErrors(es);
   }, [db]);
 
@@ -92,9 +116,16 @@ export default function HomeScreen() {
   const isFresh = servers.length === 0 && jobs.length === 0;
 
   return (
-    <ThemedView style={styles.container}>
+    <ThemedView style={[styles.container, { paddingTop: insets.top + 8 }]}>
       <View style={styles.header}>
         <ThemedText type="title">Dashboard</ThemedText>
+        <Pressable
+          onPress={() => router.push('/settings')}
+          hitSlop={8}
+          accessibilityLabel="Open settings"
+          style={({ pressed }) => ({ opacity: pressed ? 0.5 : 1 })}>
+          <IconSymbol name="gearshape.fill" color={Colors[scheme].icon} size={24} />
+        </Pressable>
       </View>
 
       <ScrollView
@@ -108,7 +139,7 @@ export default function HomeScreen() {
         }>
         {isFresh ? (
           <OnboardingCard
-            onAddServer={() => router.push('/(tabs)/settings')}
+            onAddServer={() => router.push('/(tabs)/servers')}
             onAddJob={() => router.push('/(tabs)/jobs')}
             hasServers={false}
           />
@@ -146,32 +177,14 @@ export default function HomeScreen() {
           </View>
         ) : null}
 
-        {hasAnyBytes ? <BytesOverTime buckets={buckets} tint={Colors[scheme].tint} /> : null}
+        {hasAnyBytes ? <BytesOverTime buckets={buckets} /> : null}
 
         {jobs.length > 0 ? (
-          <>
-            <ThemedText type="subtitle" style={styles.sectionHeader}>
-              Jobs
-            </ThemedText>
-            {jobs.map((job) => {
-              const run = runs.find((r) => r.job_id === job.id) ?? null;
-              return (
-                <Pressable
-                  key={job.id}
-                  onPress={() => router.push(`/job/${job.id}`)}
-                  style={({ pressed }) => [styles.row, { opacity: pressed ? 0.6 : 1 }]}>
-                  <View style={{ flex: 1, gap: 3 }}>
-                    <ThemedText type="defaultSemiBold">{job.name}</ThemedText>
-                    <ThemedText style={styles.rowSub} numberOfLines={1}>
-                      {job.remote_path}
-                    </ThemedText>
-                    <RunLine run={run} />
-                  </View>
-                  <IconSymbol name="chevron.right" color={Colors[scheme].icon} size={18} />
-                </Pressable>
-              );
-            })}
-          </>
+          <HealthStrip
+            jobs={jobs}
+            latestByJob={latestByJob}
+            onOpen={() => router.push('/(tabs)/jobs')}
+          />
         ) : null}
 
         {recentErrors.length > 0 ? (
@@ -185,11 +198,13 @@ export default function HomeScreen() {
                 onPress={() => router.push(`/run/${err.run_id}`)}
                 style={({ pressed }) => [
                   styles.errorRow,
-                  { opacity: pressed ? 0.6 : 1 },
+                  { borderBottomColor: Colors[scheme].border, opacity: pressed ? 0.6 : 1 },
                 ]}>
                 <View style={{ flex: 1, gap: 2 }}>
                   <View style={styles.errorHeadline}>
-                    <ThemedText style={styles.errorPhase}>{err.phase}</ThemedText>
+                    <ThemedText style={[styles.errorPhase, { color: Colors[scheme].danger }]}>
+                      {err.phase}
+                    </ThemedText>
                     <ThemedText style={styles.errorStatus}>
                       {err.http_status != null ? `HTTP ${err.http_status}` : '—'}
                     </ThemedText>
@@ -211,7 +226,7 @@ export default function HomeScreen() {
 
         {!isFresh && jobs.length === 0 ? (
           <OnboardingCard
-            onAddServer={() => router.push('/(tabs)/settings')}
+            onAddServer={() => router.push('/(tabs)/servers')}
             onAddJob={() => router.push('/(tabs)/jobs')}
             hasServers={servers.length > 0}
           />
@@ -231,23 +246,10 @@ function ActiveRunCard({
   onOpen: () => void;
 }) {
   const scheme = useColorScheme() ?? 'light';
-  const { etaMs, rateBytesPerSec } = useEta(
-    run.uploadedBytes,
-    run.totalBytes,
-    run.startedAt,
-  );
-  const pct =
-    run.totalBytes > 0
-      ? Math.min(100, Math.round((run.uploadedBytes / run.totalBytes) * 100))
-      : 0;
-  const label =
-    run.phase === 'scanning'
-      ? 'Scanning…'
-      : run.phase === 'finalizing'
-        ? 'Finalizing…'
-        : 'Uploading';
-  const eta = formatEta(etaMs);
-  const rate = formatRate(rateBytesPerSec);
+  const { batch } = useSyncAll();
+  const phase = batch
+    ? `job ${Math.min(batch.completed + 1, batch.total)}/${batch.total} · ${phaseLabel(run.phase)}`
+    : phaseLabel(run.phase);
   const onCancelPress = () => {
     Alert.alert(
       'Cancel sync?',
@@ -279,66 +281,9 @@ function ActiveRunCard({
         <ThemedText type="defaultSemiBold" style={{ flex: 1 }} numberOfLines={1}>
           {jobName}
         </ThemedText>
-        <ThemedText style={styles.heroPhase}>{label}</ThemedText>
+        <ThemedText style={styles.heroPhase}>{phase}</ThemedText>
       </View>
-      <View style={styles.progressTrack}>
-        <View
-          style={[
-            styles.progressFill,
-            { width: `${pct}%`, backgroundColor: Colors[scheme].accent },
-          ]}
-        />
-      </View>
-      <View style={styles.heroProgressRow}>
-        <ThemedText style={styles.heroMuted}>
-          {formatBytes(run.uploadedBytes)} / {formatBytes(run.totalBytes)} ({pct}%)
-        </ThemedText>
-        <ThemedText style={styles.heroMuted}>
-          {[rate, eta].filter(Boolean).join(' · ')}
-        </ThemedText>
-      </View>
-      {run.activeFiles.length > 0 ? (
-        <View style={styles.heroFiles}>
-          {run.activeFiles.slice(0, 4).map((f) => {
-            const fpct =
-              f.size > 0
-                ? Math.min(100, Math.round((f.bytesUploaded / f.size) * 100))
-                : 0;
-            return (
-              <View key={f.localPath} style={styles.heroFileRow}>
-                <ThemedText numberOfLines={1} style={styles.heroFileName}>
-                  {f.name}
-                </ThemedText>
-                <ThemedText style={styles.heroFilePct}>{fpct}%</ThemedText>
-              </View>
-            );
-          })}
-          {run.activeFiles.length > 4 ? (
-            <ThemedText style={styles.heroMuted}>
-              +{run.activeFiles.length - 4} more uploading…
-            </ThemedText>
-          ) : null}
-        </View>
-      ) : null}
-      <ThemedText style={styles.heroMuted}>
-        {run.counters.uploaded} uploaded · {run.counters.skipped} skipped ·{' '}
-        {run.counters.failed} failed
-      </ThemedText>
-      {run.dedupedBytes > 0 ? (
-        <ThemedText style={[styles.heroDedup, { color: Colors[scheme].success }]}>
-          saved {formatBytes(run.dedupedBytes)} via dedup
-        </ThemedText>
-      ) : null}
-      {run.errors.length > 0 ? (
-        <View style={{ marginTop: 4, gap: 2 }}>
-          {run.errors.slice(-3).map((e, i) => (
-            <ThemedText key={i} style={[styles.heroError, { color: Colors[scheme].danger }]} numberOfLines={1}>
-              {e.phase}: {basename(e.localPath) || '(run)'} —{' '}
-              {e.message ?? `HTTP ${e.httpStatus}`}
-            </ThemedText>
-          ))}
-        </View>
-      ) : null}
+      <RunProgress run={run} />
       <Pressable
         onPress={onCancelPress}
         hitSlop={8}
@@ -419,21 +364,19 @@ function OnboardingCard({
 }) {
   const scheme = useColorScheme() ?? 'light';
   return (
-    <View style={styles.onboarding}>
+    <View style={[styles.onboarding, { borderColor: Colors[scheme].border }]}>
       <ThemedText type="subtitle">Get started</ThemedText>
       <OnboardingStep
         n={1}
         label="Add a copyparty server"
         done={hasServers}
         onPress={onAddServer}
-        tint={Colors[scheme].tint}
       />
       <OnboardingStep
         n={2}
         label="Create a sync job"
         done={false}
         onPress={onAddJob}
-        tint={Colors[scheme].tint}
       />
     </View>
   );
@@ -444,14 +387,15 @@ function OnboardingStep({
   label,
   done,
   onPress,
-  tint,
 }: {
   n: number;
   label: string;
   done: boolean;
   onPress: () => void;
-  tint: string;
 }) {
+  const scheme = useColorScheme() ?? 'light';
+  const tint = Colors[scheme].tint;
+  const success = Colors[scheme].success;
   return (
     <Pressable
       onPress={onPress}
@@ -463,11 +407,11 @@ function OnboardingStep({
         style={[
           styles.onboardingBadge,
           done
-            ? { backgroundColor: '#2a9d3f', borderColor: '#2a9d3f' }
+            ? { backgroundColor: success, borderColor: success }
             : { borderColor: tint },
         ]}>
         {done ? (
-          <IconSymbol name="checkmark.circle.fill" color="#fff" size={16} />
+          <IconSymbol name="checkmark.circle.fill" color={Colors[scheme].onAccent} size={16} />
         ) : (
           <ThemedText style={{ color: tint, fontWeight: '700' }}>{n}</ThemedText>
         )}
@@ -478,10 +422,12 @@ function OnboardingStep({
   );
 }
 
-function BytesOverTime({ buckets, tint }: { buckets: DayBucket[]; tint: string }) {
+function BytesOverTime({ buckets }: { buckets: DayBucket[] }) {
+  const scheme = useColorScheme() ?? 'light';
+  const tint = Colors[scheme].tint;
   const peak = buckets.reduce((m, b) => (b.bytes > m ? b.bytes : m), 0);
   return (
-    <View style={styles.chartWrap}>
+    <View style={[styles.chartWrap, { borderColor: Colors[scheme].border }]}>
       <View style={styles.chartHeader}>
         <ThemedText type="subtitle">Last {buckets.length} days</ThemedText>
         <ThemedText style={styles.chartPeak}>
@@ -500,8 +446,8 @@ function BytesOverTime({ buckets, tint }: { buckets: DayBucket[]; tint: string }
                     styles.chartBar,
                     {
                       height: `${pct}%`,
-                      backgroundColor: last ? tint : '#8886',
-                      opacity: b.bytes > 0 ? 1 : 0.3,
+                      backgroundColor: last ? tint : Colors[scheme].muted,
+                      opacity: b.bytes > 0 ? (last ? 1 : 0.6) : 0.25,
                     },
                   ]}
                 />
@@ -515,17 +461,55 @@ function BytesOverTime({ buckets, tint }: { buckets: DayBucket[]; tint: string }
   );
 }
 
-function RunLine({ run }: { run: RunRow | null }) {
-  if (!run) {
-    return <ThemedText style={styles.runMuted}>Never synced</ThemedText>;
-  }
+function HealthStrip({
+  jobs,
+  latestByJob,
+  onOpen,
+}: {
+  jobs: JobRow[];
+  latestByJob: Map<number, RunRow | null>;
+  onOpen: () => void;
+}) {
+  const scheme = useColorScheme() ?? 'light';
+  const latest = jobs.map((j) => latestByJob.get(j.id) ?? null);
+  const failing = latest.filter((r) => r?.status === 'failed').length;
+  const partial = latest.filter((r) => r?.status === 'partial').length;
+  const never = latest.filter((r) => r === null).length;
+  const lastSyncAt = latest.reduce(
+    (m, r) => (r && r.started_at > m ? r.started_at : m),
+    0,
+  );
+
+  const color =
+    failing > 0
+      ? Colors[scheme].danger
+      : partial > 0
+        ? Colors[scheme].warning
+        : never === jobs.length
+          ? Colors[scheme].muted
+          : Colors[scheme].success;
+
+  const parts = [`${jobs.length} job${jobs.length === 1 ? '' : 's'}`];
+  if (failing > 0) parts.push(`${failing} failing`);
+  if (partial > 0) parts.push(`${partial} partial`);
+  if (never > 0) parts.push(`${never} never synced`);
+  if (failing === 0 && partial === 0 && never === 0) parts.push('all ok');
+  if (lastSyncAt > 0) parts.push(`last sync ${formatRelativeTime(lastSyncAt)}`);
+
   return (
-    <View style={styles.runLine}>
-      <StatusDot status={run.status} />
-      <ThemedText style={styles.runText} numberOfLines={1}>
-        {new Date(run.started_at).toLocaleString()} · {run.status}
+    <Pressable
+      onPress={onOpen}
+      accessibilityLabel="Open the Jobs tab"
+      style={({ pressed }) => [
+        styles.healthStrip,
+        { borderColor: Colors[scheme].border, opacity: pressed ? 0.6 : 1 },
+      ]}>
+      <View style={[styles.statusDot, { backgroundColor: color }]} />
+      <ThemedText style={styles.healthText} numberOfLines={1}>
+        {parts.join(' · ')}
       </ThemedText>
-    </View>
+      <IconSymbol name="chevron.right" color={Colors[scheme].icon} size={16} />
+    </Pressable>
   );
 }
 
@@ -545,7 +529,7 @@ function SummaryCell({
 }) {
   const scheme = useColorScheme() ?? 'light';
   return (
-    <View style={styles.summaryCell}>
+    <View style={[styles.summaryCell, { borderColor: Colors[scheme].border }]}>
       <ThemedText
         type="title"
         style={[styles.summaryValue, bad ? { color: Colors[scheme].danger } : undefined]}>
@@ -556,19 +540,6 @@ function SummaryCell({
   );
 }
 
-function basename(p: string): string {
-  if (!p) return '';
-  const i = p.lastIndexOf('/');
-  return i >= 0 ? p.slice(i + 1) : p;
-}
-
-function formatBytes(n: number): string {
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KiB`;
-  if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MiB`;
-  return `${(n / 1024 / 1024 / 1024).toFixed(2)} GiB`;
-}
-
 function dayLabel(day: string, isToday: boolean): string {
   if (isToday) return 'Today';
   const d = new Date(day + 'T00:00:00');
@@ -576,8 +547,14 @@ function dayLabel(day: string, isToday: boolean): string {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, paddingTop: 56 },
-  header: { paddingHorizontal: 16, paddingBottom: 12 },
+  container: { flex: 1 },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingBottom: 12,
+  },
   scroll: { paddingBottom: 24 },
   hero: {
     marginHorizontal: 16,
@@ -590,18 +567,6 @@ const styles = StyleSheet.create({
   heroHeader: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   heroPhase: { fontSize: 12, opacity: 0.7, textTransform: 'capitalize' },
   heroMuted: { fontSize: 12, opacity: 0.7 },
-  heroProgressRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    gap: 8,
-  },
-  heroFiles: { marginTop: 2, gap: 2 },
-  heroFileRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  heroFileName: { flex: 1, fontSize: 12, opacity: 0.85 },
-  heroFilePct: { fontSize: 12, opacity: 0.7, fontVariant: ['tabular-nums'] },
-  heroDedup: { fontSize: 12, color: '#2a9d3f' },
-  heroError: { fontSize: 11, color: '#c33' },
   heroCancel: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -611,13 +576,6 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
   },
   heroCancelText: { fontSize: 13, fontWeight: '600' },
-  progressTrack: {
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: '#8883',
-    overflow: 'hidden',
-  },
-  progressFill: { height: '100%' },
   summary: {
     flexDirection: 'row',
     gap: 8,
@@ -629,26 +587,24 @@ const styles = StyleSheet.create({
     padding: 12,
     borderRadius: 8,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: '#8884',
     alignItems: 'flex-start',
   },
   summaryValue: { fontSize: 20, lineHeight: 24 },
   summaryLabel: { fontSize: 11, opacity: 0.7, marginTop: 2 },
   sectionHeader: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 4 },
-  row: {
+  statusDot: { width: 8, height: 8, borderRadius: 4 },
+  healthStrip: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 16,
+    gap: 10,
+    marginHorizontal: 16,
+    marginBottom: 12,
+    paddingHorizontal: 14,
     paddingVertical: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#8882',
+    borderRadius: 10,
+    borderWidth: StyleSheet.hairlineWidth,
   },
-  rowSub: { opacity: 0.7, fontSize: 13 },
-  runLine: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  runText: { opacity: 0.7, fontSize: 12, flexShrink: 1 },
-  runMuted: { opacity: 0.5, fontSize: 12, fontStyle: 'italic' },
-  statusDot: { width: 8, height: 8, borderRadius: 4 },
+  healthText: { flex: 1, fontSize: 14 },
   errorRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -656,20 +612,18 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 10,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#8882',
   },
   errorHeadline: { flexDirection: 'row', justifyContent: 'space-between' },
-  errorPhase: { fontSize: 12, fontWeight: '600', color: '#c33', textTransform: 'uppercase' },
+  errorPhase: { fontSize: 12, fontWeight: '600', textTransform: 'uppercase' },
   errorStatus: { fontSize: 11, opacity: 0.7 },
   errorPath: { fontSize: 13 },
-  errorMsg: { fontSize: 11, opacity: 0.7 },
+  errorMsg: { fontSize: 12, opacity: 0.7 },
   onboarding: {
     marginHorizontal: 16,
     marginBottom: 12,
     padding: 14,
     borderRadius: 10,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: '#8884',
     gap: 10,
   },
   onboardingStep: {
@@ -695,7 +649,6 @@ const styles = StyleSheet.create({
     padding: 12,
     borderRadius: 10,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: '#8884',
     gap: 8,
   },
   chartHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },

@@ -29,11 +29,12 @@ const MAPPING = {
   'exclamationmark.triangle.fill': 'warning',
   'xmark.circle.fill': 'cancel',
   'clock': 'schedule',
-  'arrow.up.circle.fill': 'arrow-upward',
+  'arrow.up.circle.fill': 'arrow-circle-up',
   'lock.fill': 'lock',
   'chevron.left': 'chevron-left',
   'xmark': 'close',
   'arrow.up.arrow.down': 'import-export',
+  'externaldrive.fill': 'storage',
   'square.and.arrow.up': 'file-upload',
   'square.and.arrow.down': 'file-download',
 } as IconMapping;

@@ -57,6 +57,12 @@ export default function ServerEditScreen() {
   const [loaded, setLoaded] = useState(isNew);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
+  // Inline Test-connection outcome shown under the button — a passing test
+  // shouldn't interrupt with a modal alert.
+  const [testResult, setTestResult] = useState<{
+    ok: boolean;
+    message: string;
+  } | null>(null);
   // Tracks whether a stored password exists for the edited server. Used to
   // enable the Test button when the password field is blank (edit mode).
   const [hasStoredSecret, setHasStoredSecret] = useState(false);
@@ -132,9 +138,10 @@ export default function ServerEditScreen() {
   const onTest = async () => {
     if (!canTest) return;
     setTesting(true);
+    setTestResult(null);
     try {
       if (!/^https?:\/\//i.test(baseUrl.trim())) {
-        Alert.alert('Test failed', 'URL must start with http:// or https://.');
+        setTestResult({ ok: false, message: 'URL must start with http:// or https://.' });
         return;
       }
       let pw = password;
@@ -147,9 +154,12 @@ export default function ServerEditScreen() {
         username: username.trim() || undefined,
         certSha256: certSha.trim() ? normalizeFingerprint(certSha) : null,
       });
-      Alert.alert('Connection OK', 'Server responded and auth was accepted.');
+      setTestResult({ ok: true, message: 'Server responded and auth was accepted.' });
     } catch (e) {
-      Alert.alert('Test failed', e instanceof Error ? e.message : String(e));
+      setTestResult({
+        ok: false,
+        message: e instanceof Error ? e.message : String(e),
+      });
     } finally {
       setTesting(false);
     }
@@ -286,7 +296,7 @@ export default function ServerEditScreen() {
               autoCorrect={false}
             />
             {certSha.trim().length > 0 && !HEX64.test(normalizeFingerprint(certSha)) ? (
-              <ThemedText style={styles.errorText}>
+              <ThemedText style={[styles.errorText, { color: Colors[scheme].danger }]}>
                 Fingerprint must be 64 hex characters (colons and spaces ok).
               </ThemedText>
             ) : null}
@@ -310,15 +320,33 @@ export default function ServerEditScreen() {
               {testing ? 'Testing…' : 'Test connection'}
             </ThemedText>
           </Pressable>
+          {testResult ? (
+            <View style={styles.testResultRow}>
+              <ThemedText
+                style={[
+                  styles.testResultText,
+                  {
+                    color: testResult.ok
+                      ? Colors[scheme].success
+                      : Colors[scheme].danger,
+                  },
+                ]}>
+                {testResult.ok ? '✓ ' : '✕ '}
+                {testResult.message}
+              </ThemedText>
+            </View>
+          ) : null}
 
           {!isNew ? (
             <Pressable
               onPress={confirmDelete}
               style={({ pressed }) => [
                 styles.deleteBtn,
-                { opacity: pressed ? 0.6 : 1 },
+                { borderColor: Colors[scheme].danger, opacity: pressed ? 0.6 : 1 },
               ]}>
-              <ThemedText style={styles.deleteBtnText}>Delete server</ThemedText>
+              <ThemedText style={[styles.deleteBtnText, { color: Colors[scheme].danger }]}>
+                Delete server
+              </ThemedText>
             </Pressable>
           ) : null}
         </ScrollView>
@@ -351,7 +379,7 @@ const styles = StyleSheet.create({
   passwordRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   passwordInput: { flex: 1 },
   revealBtn: { paddingHorizontal: 8, paddingVertical: 8 },
-  errorText: { color: '#c33', fontSize: 12 },
+  errorText: { fontSize: 12 },
   testBtn: {
     marginTop: 8,
     padding: 14,
@@ -359,13 +387,14 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     alignItems: 'center',
   },
+  testResultRow: { paddingHorizontal: 2 },
+  testResultText: { fontSize: 13 },
   deleteBtn: {
     marginTop: 8,
     padding: 14,
     borderRadius: 8,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: '#c33',
     alignItems: 'center',
   },
-  deleteBtnText: { color: '#c33', fontWeight: '600' },
+  deleteBtnText: { fontWeight: '600' },
 });

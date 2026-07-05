@@ -1,5 +1,6 @@
 import { xchacha20poly1305 } from '@noble/ciphers/chacha';
-import { scryptAsync } from '@noble/hashes/scrypt';
+// v2 of @noble/hashes is ESM-only and requires explicit .js subpaths.
+import { scryptAsync } from '@noble/hashes/scrypt.js';
 
 import { base64ToBytes, bytesToBase64 } from './base64';
 

@@ -1,7 +1,7 @@
 import * as FileSystem from 'expo-file-system/legacy';
-import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
+import { Stack, useRouter } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -20,11 +20,8 @@ import { RemotePathBrowser } from '@/components/remote-path-browser';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { IconSymbol } from '@/components/ui/icon-symbol';
-import { statusColor } from '@/constants/status-colors';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
-import { formatEta, formatRate, useEta } from '@/hooks/use-eta';
-import { useSyncProgress } from '@/hooks/use-sync-progress';
 import { normalizeRemotePath } from '@/src/copyparty/paths';
 import { testJobConnection } from '@/src/copyparty/test-connection';
 import {
@@ -36,31 +33,18 @@ import {
   MIN_CONCURRENCY,
   updateJob,
 } from '@/src/db/jobs';
-import {
-  getLatestRunForJob,
-  listRunErrors,
-  listRunsForJob,
-} from '@/src/db/runs';
+import { getLatestRunForJob } from '@/src/db/runs';
 import { listServers } from '@/src/db/servers';
-import type {
-  PathOrganization,
-  RunErrorRow,
-  RunRow,
-  ServerRow,
-  SourceKind,
-} from '@/src/db/types';
-import { getServerPassword } from '@/src/storage/secrets';
+import type { PathOrganization, ServerRow, SourceKind } from '@/src/db/types';
 import { listMediaAlbums, type AlbumOption } from '@/src/media/albums';
+import { getServerPassword } from '@/src/storage/secrets';
 import { ensureNotificationPermission } from '@/src/sync/notify-permission';
 import { dateSubdir, PATH_ORGANIZATIONS } from '@/src/sync/path-organization';
-import type { ActiveRunSnapshot } from '@/src/sync/progress';
 import {
   nextPeriodicRunAt,
   PERIODIC_MIN_INTERVAL_MIN,
 } from '@/src/sync/scheduler';
-import { requestCancel } from '@/src/sync/run-control';
 import { syncPeriodicRegistration } from '@/src/sync/scheduler-register';
-import { runJobManual } from '@/src/sync/triggers/manual';
 import { ALBUM_PREFIX, MEDIA_SOURCE_ALL } from '@/src/sync/walker/media';
 
 const PATH_ORG_LABELS: Record<PathOrganization, string> = {
@@ -80,14 +64,18 @@ function examplePath(remotePath: string, mode: PathOrganization): string {
   return sub ? `${base}/${sub}/photo.jpg` : `${base}/photo.jpg`;
 }
 
-export default function JobEditScreen() {
-  const { id: idParam } = useLocalSearchParams<{ id: string }>();
+/**
+ * Job settings form shared by the create (`/job/new`) and edit
+ * (`/job/[id]/edit`) routes. Owns all form state, load/save/delete, and
+ * the Test-connection flow; run status and history live on the job
+ * overview screen (`/job/[id]`), not here.
+ */
+export function JobForm({ jobId }: { jobId: number | null }) {
   const router = useRouter();
   const db = useSQLiteContext();
   const scheme = useColorScheme() ?? 'light';
 
-  const isNew = idParam === 'new';
-  const jobId = isNew ? null : Number(idParam);
+  const isNew = jobId === null;
 
   const [servers, setServers] = useState<ServerRow[]>([]);
   const [serverId, setServerId] = useState<number | null>(null);
@@ -120,32 +108,21 @@ export default function JobEditScreen() {
   const [notifyOnFailure, setNotifyOnFailure] = useState(true);
   const [loaded, setLoaded] = useState(isNew);
   const [saving, setSaving] = useState(false);
-  // `starting` covers the gap between tapping Sync-now and the engine
-  // emitting its first progress event; once `progress.activeRun` points at
-  // this job the bus takes over as the source of truth.
-  const [starting, setStarting] = useState(false);
   const [testing, setTesting] = useState(false);
-  const [latestRun, setLatestRun] = useState<RunRow | null>(null);
-  const [runHistory, setRunHistory] = useState<RunRow[]>([]);
-  const [latestErrors, setLatestErrors] = useState<RunErrorRow[]>([]);
-
-  const progress = useSyncProgress();
-  const activeRunHere =
-    progress.activeRun && progress.activeRun.jobId === jobId ? progress.activeRun : null;
-  // `cancelling` shows "Cancelling…" after the tap; reset whenever the active
-  // run changes (incl. clears) so it doesn't carry over to the next run.
-  const [cancelling, setCancelling] = useState(false);
-  const activeRunIdHere = activeRunHere?.runId ?? null;
-  useEffect(() => {
-    setCancelling(false);
-  }, [activeRunIdHere]);
+  // Inline Test-connection outcome; success stays inline, hard failures
+  // still raise an Alert so they can't be missed.
+  const [testResult, setTestResult] = useState<{
+    ok: boolean;
+    message: string;
+  } | null>(null);
+  const [lastRunStartedAt, setLastRunStartedAt] = useState<number | null>(null);
 
   useEffect(() => {
     listServers(db).then(setServers);
   }, [db]);
 
   useEffect(() => {
-    if (isNew || jobId === null) return;
+    if (jobId === null) return;
     getJob(db, jobId).then((row) => {
       if (!row) {
         Alert.alert('Job not found');
@@ -169,22 +146,10 @@ export default function JobEditScreen() {
       setNotifyOnFailure(row.notify_on_failure === 1);
       setLoaded(true);
     });
-  }, [db, isNew, jobId, router]);
-
-  const refreshHistory = useCallback(async () => {
-    if (isNew || jobId === null) return;
-    const [latest, runs] = await Promise.all([
-      getLatestRunForJob(db, jobId),
-      listRunsForJob(db, jobId, 10),
-    ]);
-    setLatestRun(latest);
-    setRunHistory(runs);
-    setLatestErrors(latest ? await listRunErrors(db, latest.id) : []);
-  }, [db, isNew, jobId]);
-
-  useEffect(() => {
-    refreshHistory();
-  }, [refreshHistory]);
+    getLatestRunForJob(db, jobId).then((run) =>
+      setLastRunStartedAt(run?.started_at ?? null),
+    );
+  }, [db, jobId, router]);
 
   // Resolve `album:<id>` into a readable title for the scope row. No prompt —
   // a passive label pass shouldn't surface a permission dialog. Reloads when
@@ -265,7 +230,7 @@ export default function JobEditScreen() {
       if (isNew) {
         await createJob(db, input);
       } else {
-        await updateJob(db, jobId!, input);
+        await updateJob(db, jobId, input);
       }
       // Update the WorkManager registration whenever a job's schedule
       // state may have changed. Failures here are non-fatal — the app
@@ -320,7 +285,7 @@ export default function JobEditScreen() {
   };
 
   const confirmDelete = () => {
-    if (isNew || jobId === null) return;
+    if (jobId === null) return;
     Alert.alert(
       `Delete ${name || 'this job'}?`,
       'Removes the job and its sync history. Files already on the server are untouched.',
@@ -331,7 +296,8 @@ export default function JobEditScreen() {
           style: 'destructive',
           onPress: async () => {
             await deleteJob(db, jobId);
-            router.back();
+            // Pop past both the edit screen and the (now dangling) overview.
+            router.dismissTo('/(tabs)/jobs');
           },
         },
       ],
@@ -347,20 +313,21 @@ export default function JobEditScreen() {
   const onTest = async () => {
     if (!canTest || serverId === null) return;
     setTesting(true);
+    setTestResult(null);
     try {
       const server = servers.find((s) => s.id === serverId);
       if (!server) {
-        Alert.alert('Test failed', 'Select a server first.');
+        setTestResult({ ok: false, message: 'Select a server first.' });
         return;
       }
       // baseUrl is trusted: it was normalized + validated at server-save time
       // (see app/server/[id].tsx). No re-check needed here.
       const pw = (await getServerPassword(serverId)) ?? '';
       if (!pw) {
-        Alert.alert(
-          'Test failed',
-          'No password stored for this server. Edit the server and re-enter it.',
-        );
+        setTestResult({
+          ok: false,
+          message: 'No password stored for this server. Edit the server and re-enter it.',
+        });
         return;
       }
       const remote = normalizeRemotePath(remotePath);
@@ -374,46 +341,30 @@ export default function JobEditScreen() {
         sourceUri: sourceKind === 'saf' ? sourceUri || undefined : undefined,
       });
       if (!result.localOk) {
-        Alert.alert(
-          sourceKind === 'media' ? 'Camera-roll permission missing' : 'Local folder unavailable',
-          sourceKind === 'media'
-            ? 'Remote OK, but camera-roll access is not granted. Grant it and retry.'
-            : 'Remote OK, but the local folder permission is gone. Re-pick it.',
-        );
+        setTestResult({
+          ok: false,
+          message:
+            sourceKind === 'media'
+              ? 'Remote OK, but camera-roll access is not granted. Grant it and retry.'
+              : 'Remote OK, but the local folder permission is gone. Re-pick it.',
+        });
       } else {
-        Alert.alert(
-          'Connection OK',
-          sourceKind === 'media'
-            ? `Remote path ${remote} is writable and camera-roll access is granted.`
-            : `Remote path ${remote} is writable and the local folder is accessible.`,
-        );
+        setTestResult({
+          ok: true,
+          message:
+            sourceKind === 'media'
+              ? `${remote} is writable and camera-roll access is granted.`
+              : `${remote} is writable and the local folder is accessible.`,
+        });
       }
     } catch (e) {
-      Alert.alert('Test failed', e instanceof Error ? e.message : String(e));
+      setTestResult({
+        ok: false,
+        message: e instanceof Error ? e.message : String(e),
+      });
     } finally {
       setTesting(false);
     }
-  };
-
-  const onSyncNow = async () => {
-    if (isNew || jobId === null || starting || activeRunHere) return;
-    setStarting(true);
-    try {
-      await runJobManual(db, jobId);
-    } catch (e) {
-      Alert.alert('Sync failed', e instanceof Error ? e.message : String(e));
-    } finally {
-      setStarting(false);
-      refreshHistory();
-    }
-  };
-
-  const onCancel = () => {
-    if (!activeRunHere) return;
-    setCancelling(true);
-    // Cooperative: the engine stops scheduling new files between uploads and
-    // finalizes the run as `cancelled`; the bus then clears `activeRun`.
-    requestCancel(activeRunHere.runId);
   };
 
   if (!loaded) {
@@ -442,7 +393,7 @@ export default function JobEditScreen() {
       style={{ flex: 1 }}>
       <Stack.Screen
         options={{
-          title: isNew ? 'New job' : name || 'Edit job',
+          title: isNew ? 'New job' : name ? `Edit ${name}` : 'Edit job',
           headerRight: () => (
             <Pressable
               onPress={save}
@@ -474,7 +425,7 @@ export default function JobEditScreen() {
           <Field label="Server">
             {servers.length === 0 ? (
               <ThemedText style={styles.hint}>
-                No servers configured. Add one from Settings.
+                No servers configured. Add one from the Servers tab.
               </ThemedText>
             ) : (
               <View style={styles.serverList}>
@@ -605,7 +556,7 @@ export default function JobEditScreen() {
                 onChangeText={setRemotePath}
                 placeholder="/phone-backups/camera"
                 placeholderTextColor={placeholder}
-                style={[inputStyle, styles.remoteInput]}
+                style={[...inputStyle, styles.remoteInput]}
                 autoCapitalize="none"
                 autoCorrect={false}
               />
@@ -709,7 +660,7 @@ export default function JobEditScreen() {
             onToggleDataSaver={setRespectDataSaver}
             chargingOnly={chargingOnly}
             onToggleCharging={setChargingOnly}
-            lastRunStartedAt={latestRun?.started_at ?? null}
+            lastRunStartedAt={lastRunStartedAt}
             inputStyle={inputStyle}
             placeholder={placeholder}
           />
@@ -748,93 +699,34 @@ export default function JobEditScreen() {
               {testing ? 'Testing…' : 'Test connection'}
             </ThemedText>
           </Pressable>
+          {testResult ? (
+            <View style={styles.testResultRow}>
+              <IconSymbol
+                name={testResult.ok ? 'checkmark.circle.fill' : 'xmark.circle.fill'}
+                color={testResult.ok ? Colors[scheme].success : Colors[scheme].danger}
+                size={16}
+              />
+              <ThemedText
+                style={[
+                  styles.testResultText,
+                  { color: testResult.ok ? Colors[scheme].success : Colors[scheme].danger },
+                ]}>
+                {testResult.message}
+              </ThemedText>
+            </View>
+          ) : null}
 
           {!isNew ? (
-            <>
-              <View style={styles.sep} />
-
-              <View style={styles.field}>
-                <ThemedText type="subtitle">Sync</ThemedText>
-                <Pressable
-                  onPress={onSyncNow}
-                  disabled={starting || activeRunHere !== null}
-                  style={({ pressed }) => [
-                    styles.syncBtn,
-                    {
-                      backgroundColor:
-                        starting || activeRunHere ? Colors[scheme].icon : Colors[scheme].accent,
-                      opacity: pressed ? 0.85 : 1,
-                    },
-                  ]}>
-                  <IconSymbol
-                    name="arrow.up.circle.fill"
-                    color={Colors[scheme].onAccent}
-                    size={22}
-                  />
-                  <ThemedText style={styles.syncBtnText}>
-                    {activeRunHere ? 'Syncing…' : starting ? 'Starting…' : 'Sync now'}
-                  </ThemedText>
-                </Pressable>
-
-                {activeRunHere ? (
-                  <Pressable
-                    onPress={onCancel}
-                    disabled={cancelling}
-                    style={({ pressed }) => [
-                      styles.cancelBtn,
-                      { opacity: cancelling ? 0.6 : pressed ? 0.85 : 1 },
-                    ]}>
-                    <IconSymbol name="xmark.circle.fill" color="#fff" size={20} />
-                    <ThemedText style={styles.cancelBtnText}>
-                      {cancelling ? 'Cancelling…' : 'Cancel'}
-                    </ThemedText>
-                  </Pressable>
-                ) : null}
-
-                {activeRunHere ? (
-                  <ActiveRunPanel run={activeRunHere} />
-                ) : (
-                  <LastRunPanel run={latestRun} errors={latestErrors} />
-                )}
-              </View>
-
-              <View style={styles.field}>
-                <ThemedText type="subtitle">Recent runs</ThemedText>
-                {runHistory.length === 0 ? (
-                  <ThemedText style={styles.hint}>No runs yet.</ThemedText>
-                ) : (
-                  runHistory.map((r) => (
-                    <Pressable
-                      key={r.id}
-                      onPress={() => router.push(`/run/${r.id}`)}
-                      style={({ pressed }) => [
-                        styles.runHistoryRow,
-                        { opacity: pressed ? 0.6 : 1 },
-                      ]}>
-                      <StatusDot status={r.status} />
-                      <ThemedText style={styles.runHistoryText} numberOfLines={1}>
-                        {new Date(r.started_at).toLocaleString()} · {r.status} ·{' '}
-                        {r.files_uploaded} up · {r.files_skipped} skip · {r.files_failed} fail
-                      </ThemedText>
-                      <IconSymbol
-                        name="chevron.right"
-                        color={Colors[scheme].icon}
-                        size={16}
-                      />
-                    </Pressable>
-                  ))
-                )}
-              </View>
-
-              <Pressable
-                onPress={confirmDelete}
-                style={({ pressed }) => [
-                  styles.deleteBtn,
-                  { opacity: pressed ? 0.6 : 1 },
-                ]}>
-                <ThemedText style={styles.deleteBtnText}>Delete job</ThemedText>
-              </Pressable>
-            </>
+            <Pressable
+              onPress={confirmDelete}
+              style={({ pressed }) => [
+                styles.deleteBtn,
+                { borderColor: Colors[scheme].danger, opacity: pressed ? 0.6 : 1 },
+              ]}>
+              <ThemedText style={[styles.deleteBtnText, { color: Colors[scheme].danger }]}>
+                Delete job
+              </ThemedText>
+            </Pressable>
           ) : null}
         </ScrollView>
         {browserConn ? (
@@ -859,151 +751,6 @@ export default function JobEditScreen() {
       </ThemedView>
     </KeyboardAvoidingView>
   );
-}
-
-function ActiveRunPanel({ run }: { run: ActiveRunSnapshot }) {
-  const scheme = useColorScheme() ?? 'light';
-  const { etaMs, rateBytesPerSec } = useEta(
-    run.uploadedBytes,
-    run.totalBytes,
-    run.startedAt,
-  );
-  const pct =
-    run.totalBytes > 0
-      ? Math.min(100, Math.round((run.uploadedBytes / run.totalBytes) * 100))
-      : 0;
-  const eta = formatEta(etaMs);
-  const rate = formatRate(rateBytesPerSec);
-  return (
-    <View style={styles.panel}>
-      <ThemedText style={styles.panelLabel}>{phaseLabel(run.phase)}</ThemedText>
-      <View style={styles.progressTrack}>
-        <View
-          style={[styles.progressFill, { width: `${pct}%`, backgroundColor: Colors[scheme].accent }]}
-        />
-      </View>
-      <View style={styles.progressRow}>
-        <ThemedText style={styles.muted}>
-          {formatBytes(run.uploadedBytes)} / {formatBytes(run.totalBytes)} ({pct}%)
-        </ThemedText>
-        <ThemedText style={styles.muted}>
-          {[rate, eta].filter(Boolean).join(' · ')}
-        </ThemedText>
-      </View>
-      {run.activeFiles.length > 0 ? (
-        <View style={{ gap: 2 }}>
-          {run.activeFiles.slice(0, 5).map((f) => {
-            const fpct =
-              f.size > 0
-                ? Math.min(100, Math.round((f.bytesUploaded / f.size) * 100))
-                : 0;
-            return (
-              <View key={f.localPath} style={styles.fileRow}>
-                <ThemedText numberOfLines={1} style={styles.fileName}>
-                  {f.name}
-                </ThemedText>
-                <ThemedText style={styles.filePct}>{fpct}%</ThemedText>
-              </View>
-            );
-          })}
-          {run.activeFiles.length > 5 ? (
-            <ThemedText style={styles.muted}>
-              +{run.activeFiles.length - 5} more uploading…
-            </ThemedText>
-          ) : null}
-        </View>
-      ) : null}
-      <ThemedText style={styles.muted}>
-        {run.counters.uploaded} uploaded · {run.counters.skipped} skipped ·{' '}
-        {run.counters.failed} failed
-      </ThemedText>
-      {run.dedupedBytes > 0 ? (
-        <ThemedText style={styles.dedupText}>
-          saved {formatBytes(run.dedupedBytes)} via dedup
-        </ThemedText>
-      ) : null}
-      {run.errors.length > 0 ? (
-        <View style={{ marginTop: 6, gap: 2 }}>
-          {run.errors.slice(-3).map((e, i) => (
-            <ThemedText key={i} style={styles.errorText} numberOfLines={1}>
-              {e.phase}: {e.localPath || '(run)'} — {e.message ?? `HTTP ${e.httpStatus}`}
-            </ThemedText>
-          ))}
-        </View>
-      ) : null}
-    </View>
-  );
-}
-
-function LastRunPanel({
-  run,
-  errors,
-}: {
-  run: RunRow | null;
-  errors: RunErrorRow[];
-}) {
-  if (!run) {
-    return (
-      <View style={styles.panel}>
-        <ThemedText style={styles.muted}>Never synced.</ThemedText>
-      </View>
-    );
-  }
-  return (
-    <View style={styles.panel}>
-      <View style={styles.runLine}>
-        <StatusDot status={run.status} />
-        <ThemedText type="defaultSemiBold">{run.status}</ThemedText>
-        <ThemedText style={styles.muted}>
-          · {new Date(run.started_at).toLocaleString()}
-        </ThemedText>
-      </View>
-      <ThemedText style={styles.muted}>
-        {run.files_scanned} scanned, {run.files_uploaded} uploaded,{' '}
-        {run.files_skipped} skipped, {run.files_failed} failed (
-        {formatBytes(run.bytes_uploaded)})
-      </ThemedText>
-      {errors.length > 0 ? (
-        <View style={{ marginTop: 6, gap: 2 }}>
-          <ThemedText style={styles.errorHeader}>
-            {errors.length} error{errors.length === 1 ? '' : 's'}:
-          </ThemedText>
-          {errors.slice(0, 5).map((e) => (
-            <ThemedText
-              key={e.id}
-              style={styles.errorText}
-              selectable
-              numberOfLines={2}>
-              {e.phase}: {e.local_path || '(run)'} — {e.message ?? `HTTP ${e.http_status}`}
-            </ThemedText>
-          ))}
-          {errors.length > 5 ? (
-            <ThemedText style={styles.muted}>
-              …and {errors.length - 5} more
-            </ThemedText>
-          ) : null}
-        </View>
-      ) : null}
-    </View>
-  );
-}
-
-function StatusDot({ status }: { status: RunRow['status'] }) {
-  const scheme = useColorScheme() ?? 'light';
-  return <View style={[styles.statusDot, { backgroundColor: statusColor(status, scheme) }]} />;
-}
-
-function phaseLabel(phase: 'scanning' | 'uploading' | 'finalizing'): string {
-  if (phase === 'scanning') return 'Scanning folder…';
-  if (phase === 'finalizing') return 'Finalizing…';
-  return 'Uploading';
-}
-
-function formatBytes(n: number): string {
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KiB`;
-  if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MiB`;
-  return `${(n / 1024 / 1024 / 1024).toFixed(2)} GiB`;
 }
 
 function SchedulePanel(props: {
@@ -1232,74 +979,6 @@ const styles = StyleSheet.create({
   },
   uri: { opacity: 0.7, fontSize: 11, marginTop: 4 },
   hint: { opacity: 0.7, fontSize: 13 },
-  sep: { height: StyleSheet.hairlineWidth, backgroundColor: '#8885', marginVertical: 4 },
-  syncBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    paddingVertical: 12,
-    borderRadius: 8,
-  },
-  syncBtnText: { color: '#fff', fontWeight: '600', fontSize: 16 },
-  cancelBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    paddingVertical: 12,
-    borderRadius: 8,
-    backgroundColor: '#c33',
-    marginTop: 8,
-  },
-  cancelBtnText: { color: '#fff', fontWeight: '600', fontSize: 16 },
-  panel: {
-    gap: 6,
-    padding: 12,
-    borderRadius: 8,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: '#8884',
-  },
-  panelLabel: { fontSize: 12, opacity: 0.7 },
-  progressTrack: {
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: '#8883',
-    overflow: 'hidden',
-  },
-  progressFill: { height: '100%', backgroundColor: '#2a9d3f' },
-  progressRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    gap: 8,
-  },
-  fileRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  fileName: { flex: 1, fontSize: 12, opacity: 0.85 },
-  filePct: { fontSize: 12, opacity: 0.7, fontVariant: ['tabular-nums'] },
-  dedupText: { fontSize: 12, color: '#2a9d3f' },
-  muted: { opacity: 0.7, fontSize: 12 },
-  runLine: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  statusDot: { width: 8, height: 8, borderRadius: 4 },
-  errorHeader: { fontSize: 12, color: '#c33', fontWeight: '600' },
-  errorText: { fontSize: 11, color: '#c33' },
-  runHistoryRow: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 4 },
-  runHistoryText: { flex: 1, fontSize: 12, opacity: 0.8 },
-  testBtn: {
-    padding: 14,
-    borderRadius: 8,
-    borderWidth: StyleSheet.hairlineWidth,
-    alignItems: 'center',
-  },
-  deleteBtn: {
-    marginTop: 12,
-    padding: 14,
-    borderRadius: 8,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: '#c33',
-    alignItems: 'center',
-  },
-  deleteBtnText: { color: '#c33', fontWeight: '600' },
   scheduleRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1330,4 +1009,25 @@ const styles = StyleSheet.create({
   stepperGlyph: { fontSize: 24, lineHeight: 28, fontWeight: '600' },
   stepperValueWrap: { flex: 1, alignItems: 'center' },
   stepperValue: { fontSize: 22, lineHeight: 26 },
+  testBtn: {
+    padding: 14,
+    borderRadius: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+    alignItems: 'center',
+  },
+  testResultRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 6,
+    paddingHorizontal: 2,
+  },
+  testResultText: { flex: 1, fontSize: 13 },
+  deleteBtn: {
+    marginTop: 12,
+    padding: 14,
+    borderRadius: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+    alignItems: 'center',
+  },
+  deleteBtnText: { fontWeight: '600' },
 });

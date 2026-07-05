@@ -73,11 +73,14 @@ export default function RootLayout() {
               name="server/[id]"
               options={{ title: 'Server', presentation: 'modal' }}
             />
+            <Stack.Screen name="job/new" options={{ title: 'New job', presentation: 'modal' }} />
+            <Stack.Screen name="job/[id]/index" options={{ title: 'Job' }} />
             <Stack.Screen
-              name="job/[id]"
-              options={{ title: 'Job', presentation: 'modal' }}
+              name="job/[id]/edit"
+              options={{ title: 'Edit job', presentation: 'modal' }}
             />
             <Stack.Screen name="run/[id]" options={{ title: 'Run' }} />
+            <Stack.Screen name="settings" options={{ title: 'Settings' }} />
             <Stack.Screen
               name="backup"
               options={{ title: 'Backup & restore', presentation: 'modal' }}

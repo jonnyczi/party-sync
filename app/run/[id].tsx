@@ -27,6 +27,7 @@ import type {
   RunRow,
   ServerRow,
 } from '@/src/db/types';
+import { formatBytes, formatDuration } from '@/src/format';
 import { retryRunFailures } from '@/src/sync/triggers/retry';
 
 interface LoadedRun {
@@ -190,7 +191,7 @@ export default function RunDetailScreen() {
                   { backgroundColor: Colors[scheme].warning, opacity: retryDisabled ? 0.5 : pressed ? 0.8 : 1 },
                 ]}>
                 <IconSymbol name="arrow.clockwise" color={Colors[scheme].onAccent} size={16} />
-                <ThemedText style={styles.retryBtnText}>
+                <ThemedText style={[styles.retryBtnText, { color: Colors[scheme].onAccent }]}>
                   {retrying ? 'Starting…' : `Retry failed (${run.files_failed})`}
                 </ThemedText>
               </Pressable>
@@ -280,25 +281,11 @@ function StatusPill({ status }: { status: RunRow['status'] }) {
   const scheme = useColorScheme() ?? 'light';
   return (
     <View style={[styles.pill, { backgroundColor: statusColor(status, scheme) }]}>
-      <ThemedText style={styles.pillText}>{status}</ThemedText>
+      <ThemedText style={[styles.pillText, { color: Colors[scheme].onAccent }]}>
+        {status}
+      </ThemedText>
     </View>
   );
-}
-
-function formatBytes(n: number): string {
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KiB`;
-  if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MiB`;
-  return `${(n / 1024 / 1024 / 1024).toFixed(2)} GiB`;
-}
-
-function formatDuration(ms: number): string {
-  if (ms < 1000) return `${ms}ms`;
-  const s = Math.round(ms / 1000);
-  if (s < 60) return `${s}s`;
-  const m = Math.floor(s / 60);
-  const r = s % 60;
-  return r ? `${m}m ${r}s` : `${m}m`;
 }
 
 const styles = StyleSheet.create({
@@ -317,25 +304,23 @@ const styles = StyleSheet.create({
     padding: 10,
     borderRadius: 8,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: '#8884',
     alignItems: 'flex-start',
   },
   statValue: { fontSize: 22, lineHeight: 26 },
   statLabel: { fontSize: 11, opacity: 0.7, marginTop: 2 },
   bytesLine: { opacity: 0.8, marginTop: 4 },
-  dedupLine: { color: '#2a9d3f', fontSize: 13, marginTop: 2 },
+  dedupLine: { fontSize: 13, marginTop: 2 },
   retryBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    backgroundColor: '#d08900',
     borderRadius: 8,
     paddingVertical: 12,
     paddingHorizontal: 12,
     marginTop: 12,
   },
-  retryBtnText: { color: '#fff', fontWeight: '700' },
+  retryBtnText: { fontWeight: '700' },
   retryHint: { opacity: 0.6, fontSize: 12, marginTop: 6, fontStyle: 'italic' },
   openJobBtn: {
     flexDirection: 'row',
@@ -355,11 +340,10 @@ const styles = StyleSheet.create({
     marginHorizontal: 16,
     paddingVertical: 10,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#8882',
     gap: 3,
   },
   errorHeadline: { flexDirection: 'row', justifyContent: 'space-between' },
-  errorPhase: { fontSize: 12, fontWeight: '600', color: '#c33' },
+  errorPhase: { fontSize: 12, fontWeight: '600' },
   errorStatus: { fontSize: 12, opacity: 0.7 },
   errorPath: { fontSize: 13 },
   errorMsg: { fontSize: 12, opacity: 0.7 },
@@ -368,5 +352,5 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
     borderRadius: 12,
   },
-  pillText: { color: '#fff', fontSize: 12, fontWeight: '600', textTransform: 'uppercase' },
+  pillText: { fontSize: 12, fontWeight: '600', textTransform: 'uppercase' },
 });

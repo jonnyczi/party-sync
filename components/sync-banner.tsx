@@ -5,6 +5,7 @@ import { ThemedText } from '@/components/themed-text';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { useSyncAll } from '@/hooks/use-sync-all';
 import { useSyncProgress } from '@/hooks/use-sync-progress';
 
 /**
@@ -15,12 +16,18 @@ import { useSyncProgress } from '@/hooks/use-sync-progress';
  */
 export function SyncBanner() {
   const snap = useSyncProgress();
+  const { batch } = useSyncAll();
   const router = useRouter();
   const scheme = useColorScheme() ?? 'light';
 
   const run = snap.activeRun;
   if (!run) return null;
 
+  const title = batch
+    ? `Syncing all — job ${Math.min(batch.completed + 1, batch.total)} of ${batch.total}`
+    : 'Sync running';
+
+  const onAccent = Colors[scheme].onAccent;
   const pct =
     run.totalBytes > 0
       ? Math.min(100, Math.round((run.uploadedBytes / run.totalBytes) * 100))
@@ -44,19 +51,19 @@ export function SyncBanner() {
         { backgroundColor: Colors[scheme].accent, opacity: pressed ? 0.85 : 1 },
       ]}
       accessibilityLabel="Open active sync job">
-      <IconSymbol name="arrow.triangle.2.circlepath" color="#fff" size={18} />
+      <IconSymbol name="arrow.triangle.2.circlepath" color={onAccent} size={18} />
       <View style={styles.text}>
-        <ThemedText style={styles.title}>Sync running</ThemedText>
-        <ThemedText style={styles.subtitle} numberOfLines={1}>
+        <ThemedText style={[styles.title, { color: onAccent }]}>{title}</ThemedText>
+        <ThemedText style={[styles.subtitle, { color: onAccent }]} numberOfLines={1}>
           {label}
         </ThemedText>
       </View>
       <View style={styles.counters}>
-        <ThemedText style={styles.counter}>
+        <ThemedText style={[styles.counter, { color: onAccent }]}>
           {run.counters.uploaded}/{run.counters.scanned}
         </ThemedText>
         {run.counters.failed > 0 ? (
-          <ThemedText style={[styles.counter, styles.failed]}>
+          <ThemedText style={[styles.counter, styles.failed, { color: onAccent }]}>
             {run.counters.failed} failed
           </ThemedText>
         ) : null}
@@ -77,9 +84,9 @@ const styles = StyleSheet.create({
     borderRadius: 10,
   },
   text: { flex: 1, minWidth: 0 },
-  title: { color: '#fff', fontWeight: '600', fontSize: 14 },
-  subtitle: { color: '#fff', fontSize: 12, opacity: 0.9 },
+  title: { fontWeight: '600', fontSize: 14 },
+  subtitle: { fontSize: 12, opacity: 0.9 },
   counters: { alignItems: 'flex-end' },
-  counter: { color: '#fff', fontSize: 12 },
+  counter: { fontSize: 12 },
   failed: { fontWeight: '600' },
 });
