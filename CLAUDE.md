@@ -58,14 +58,17 @@ If `JAVA_HOME` is empty or `which java` has no result, you are not in the devShe
 
 ## Controlling the running emulator from a session
 
-Once an AVD is booted (see above), these are the commands that drive it:
+The full playbook (tap-target discovery, light/dark screenshot pairs, clean-shot
+prep, gotchas) lives in the **`drive-emulator` skill** (`.claude/skills/drive-emulator/`),
+backed by `scripts/emu/{ui,shot,gen-seed}.sh`. For multi-step UI sequences,
+delegate to the **`emulator-driver` agent**. README screenshot refreshes have
+their own **`readme-screenshots` skill** (scene inventory + staging + WebP pipeline).
+Essentials:
 
-- `adb devices` — expect `emulator-5554 device`.
-- `adb shell getprop sys.boot_completed` — `1` once the OS is ready; `adb shell getprop init.svc.bootanim` returns `stopped` when the boot animation finishes.
+- `adb devices` — expect `emulator-5554 device`; boot is done when `adb shell getprop sys.boot_completed` prints `1`.
 - App package: `io.github.jonnyczi.copypartyclient` (set explicitly via `app.json`'s `expo.android.package`). This is the permanent published applicationId across GitHub Releases, F-Droid, and Google Play; never reintroduce the old `com.anonymous.*` placeholder.
-- After `expo run:android` the dev-client deep-link is fired but the app may not stay foregrounded. Bring it up with `adb shell monkey -p io.github.jonnyczi.copypartyclient -c android.intent.category.LAUNCHER 1`.
-- Verify foreground: `adb shell "dumpsys activity activities | grep topResumedActivity"` — look for `io.github.jonnyczi.copypartyclient/.MainActivity`.
-- Screenshot: `adb exec-out screencap -p | magick png:- -resize 50% -quality 80 tmp/shot.jpg`, then Read the JPEG. `magick` (ImageMagick) comes from the devShell; the 50%/q80 downscale keeps UI text legible while cutting image tokens ~4× vs the raw 1080×2424 PNG (Claude vision tokens are pixel-count driven, not file-size driven).
+- After `expo run:android` the app may not stay foregrounded; bring it up with `adb shell monkey -p io.github.jonnyczi.copypartyclient -c android.intent.category.LAUNCHER 1`.
+- Quick screenshot for visual checks: `adb exec-out screencap -p | magick png:- -resize 50% -quality 80 tmp/shot.jpg`, then Read the JPEG (the downscale cuts vision tokens ~4×; `magick` comes from the devShell).
 
 ## Testing against a copyparty server
 
