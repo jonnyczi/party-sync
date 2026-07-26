@@ -1,114 +1,156 @@
-# Welcome to your Expo app 👋
+# copyparty client for Android
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+Back up your phone to your own server. This app syncs folders and your camera roll
+from Android to a [copyparty](https://github.com/9001/copyparty) server — on your
+LAN or anywhere else. No cloud, no Google services.
 
-## Get started
+[![Get it on GitHub Releases](https://img.shields.io/badge/get_it_on-GitHub_Releases-2da44e?logo=github)](https://github.com/jonnyczi/copyparty-client/releases/latest)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-1. Install dependencies
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/dashboard-dark.webp">
+    <img src="docs/screenshots/dashboard-light.webp" width="300" alt="Dashboard showing the last sync result, 24-hour upload stats, a 7-day upload chart, and per-job health">
+  </picture>
+</p>
 
-   ```bash
-   npm install
-   ```
+## Features
 
-2. Start the app
+- **Folder & camera-roll sync jobs** — back up any folder or your photo library; each job has its own server, remote path, and album scope
+- **Scheduled background sync** — periodic sync every N minutes with Wi-Fi-only, Data-Saver, and charging-only constraints; a foreground service keeps long uploads alive
+- **Setup health checklist** — probes battery optimization, background limits, Data Saver, and vendor quirks, with one-tap fixes so scheduled syncs actually run
+- **Fast, deduplicated uploads** — copyparty's up2k protocol with content hashing; files the server already has are skipped without re-uploading
+- **Run history & retry** — every sync records per-file results and errors; retry just the failed files with one tap
+- **Date-organized uploads** — bucket photos into `2026/07/`-style folders by modification date
+- **Notifications without Google** — per-job success/failure notifications built on plain AndroidX, no Firebase/GMS
+- **Backup & restore** — export servers and jobs to an optionally encrypted file and import them on another device
+- **Plain `http://` and self-signed TLS** — LAN servers without certificates work out of the box; pin a certificate SHA-256 for self-signed HTTPS
 
-   ```bash
-   npx expo start
-   ```
+## Install
 
-In the output, you'll find options to open the app in a
+Download the APK from the [latest release](https://github.com/jonnyczi/copyparty-client/releases/latest),
+verify it against the release's `SHA256SUMS`, and sideload it.
 
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
+F-Droid and Google Play submissions are planned — see [docs/roadmap.md](docs/roadmap.md).
 
-## Running the app (NixOS)
+## Quick start
 
-This project uses the native module `modules/copyparty-sha512`, so Expo Go is **not** supported — you need a dev build. The emulator + AVDs are managed on the host via Android Studio; the repo's `flake.nix` provides the build toolchain (JDK 17, Gradle, Android SDK, NDK, CMake). iOS simulator is macOS-only and not covered here.
+You need a copyparty server reachable from your phone —
+[setting one up](https://github.com/9001/copyparty#quickstart) takes a minute.
 
-One-time host setup (NixOS only, symlink so the macOS-style SDK path resolves):
+**1. Open the app** — the dashboard walks you through the two setup steps.
 
-```bash
-mkdir -p ~/Library/Android && ln -sfn ~/Android/Sdk ~/Library/Android/sdk
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/quickstart-1-get-started-dark.webp">
+  <img src="docs/screenshots/quickstart-1-get-started-light.webp" width="260" alt="Fresh dashboard with a Get started card listing two steps: add a copyparty server and create a sync job">
+</picture>
 
-### 1. Start the Android emulator
+**2. Add your server** — base URL plus optional username and password.
+**Test connection** confirms the URL and credentials before you save.
 
-The reliable launch path is **Android Studio → Device Manager → ▶ on an AVD**. The SDK's `emulator` binary is an unpatched FHS ELF, so launching it from a plain shell fails with `libX11.so.6: cannot open shared object file`. (Alternative: `emulator @<AVD_NAME>` works from any shell *only after* you add the X runtime libs to `programs.nix-ld.libraries` — see the lib list in `CLAUDE.md`.)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/quickstart-2-add-server-dark.webp">
+  <img src="docs/screenshots/quickstart-2-add-server-light.webp" width="260" alt="New server form with name, base URL, username, password, optional pinned certificate, and a successful test-connection result">
+</picture>
 
-Then confirm it's booted:
+**3. Create a sync job** — pick a local folder or your camera roll, choose the
+remote path (browse the server's folders in-app), and optionally organize uploads
+into date folders.
 
-```bash
-adb devices                            # expect: emulator-5554   device
-adb shell getprop sys.boot_completed   # 1 when the OS is ready
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/quickstart-3-create-job-dark.webp">
+  <img src="docs/screenshots/quickstart-3-create-job-light.webp" width="260" alt="New job form with the camera roll selected as source, a remote path with Browse button, and organize-by-date options">
+</picture>
 
-### 2. Build & launch the dev build
+**4. Sync** — tap **Sync now** (or let the schedule handle it). The dashboard
+tracks results, volume, and errors.
 
-Enter the dev shell and sanity-check you're in it — if `which java` prints nothing you are **not** in the devShell and the build will fail with `JAVA_HOME is not set`:
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/quickstart-4-first-sync-dark.webp">
+  <img src="docs/screenshots/quickstart-4-first-sync-light.webp" width="260" alt="Dashboard after the first successful sync, showing the run summary and 24-hour stats">
+</picture>
+
+## A quick tour
+
+### Live progress
+
+Active syncs show throughput, ETA, and per-file progress — on the dashboard and
+as a foreground-service notification. Cancel any time.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/sync-active-dark.webp">
+  <img src="docs/screenshots/sync-active-light.webp" width="260" alt="Dashboard during an active sync: progress bar at 22 percent, upload speed, time remaining, current file, and a cancel button">
+</picture>
+
+### All your jobs in one place
+
+Each job shows its target and last result. Sync one job, or everything with
+**Sync all**.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/jobs-dark.webp">
+  <img src="docs/screenshots/jobs-light.webp" width="260" alt="Jobs tab listing a camera roll job and a documents job with their servers, remote paths, and last-run results, plus Sync all and Add buttons">
+</picture>
+
+### Scheduling that respects your battery and data
+
+Per-job periodic sync with Wi-Fi-only, Data-Saver, and charging-only constraints,
+parallel-upload tuning, and per-job notifications.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/schedule-dark.webp">
+  <img src="docs/screenshots/schedule-light.webp" width="260" alt="Job schedule settings: periodic background sync every 360 minutes, Wi-Fi only and Data Saver toggles on, the next planned run time, and notification switches">
+</picture>
+
+### Run history with per-file errors — and one-tap retry
+
+Every sync records what was scanned, uploaded, skipped, and failed. Failed files
+list the exact error and can be retried on their own.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/run-retry-dark.webp">
+  <img src="docs/screenshots/run-retry-light.webp" width="260" alt="Run detail of a partial sync: stats for scanned, uploaded, skipped and failed files, a Retry failed button, and per-file network errors">
+</picture>
+
+### Background sync that actually runs
+
+Android loves to kill background work. The built-in checklist probes battery
+optimization, background limits, Data Saver, and vendor-specific settings — and
+fixes each one with a tap.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/background-sync-dark.webp">
+  <img src="docs/screenshots/background-sync-light.webp" width="260" alt="Background sync checklist flagging battery optimization as blocking with an Allow exemption button, and five other checks passing">
+</picture>
+
+## Development
+
+Expo / React Native app with native Android modules — Expo Go won't work, you need
+a dev build. The repo ships a Nix dev shell with the full Android toolchain and a
+Dockerized copyparty for local testing:
 
 ```bash
 nix develop
-which java        # must print a path
-npm run android   # expo run:android: prebuild → Gradle build → install → Metro → launch
+npm run android                 # build + install on a connected emulator/device
+npm run test:integration:up     # local copyparty on :3923
 ```
 
-Or run it in one shot from outside the shell:
+`npm test` runs the unit tests, `npm run lint` lints. Full setup details
+(emulator, NixOS notes, test server): [docs/development.md](docs/development.md).
+
+## Building & releases
+
+Release APKs/AABs are built reproducibly in a container via Dagger — only Docker
+is needed on the host:
 
 ```bash
-nix develop --command bash -c 'npm run android'
+dagger call build-apk export --path ./out/app.apk
 ```
 
-Notes:
+See [docs/release-pipeline.md](docs/release-pipeline.md) for signing, CI, and the
+F-Droid-friendly build gates. Versions are bumped with `npm run bump-version`;
+tagging `vX.Y.Z` publishes a GitHub Release.
 
-- First Gradle run downloads the distribution; `flake.nix`'s `shellHook` primes `~/.gradle/wrapper/dists/...` and bumps the wrapper's `networkTimeout` to 600s. If priming fails, the shell prints the exact `curl` command to retry.
-- Subsequent iterations only need Metro: `npm start` from inside `nix develop`.
+## License
 
-### 3. Bring up the copyparty test server
-
-The app talks to a [copyparty](https://github.com/9001/copyparty) server. A Dockerized one is provided for local dev:
-
-```bash
-npm run test:integration:up     # starts copyparty/ac:latest on :3923, waits for healthcheck
-npm run test:integration:down   # tear down (-v also drops the persisted volume for a clean slate)
-```
-
-It exposes a single account `test` / `testpw` with full access to one volume. Connect using:
-
-| From | URL |
-| --- | --- |
-| Host (curl, browser) | `http://127.0.0.1:3923` |
-| **Android emulator (the app)** | `http://10.0.2.2:3923` |
-
-`10.0.2.2` is the Android-emulator alias for the host's loopback. In the app, add a Server pointing at `http://10.0.2.2:3923` with user `test` / password `testpw`. Host-side sanity check:
-
-```bash
-curl -u test:testpw "http://127.0.0.1:3923/?ls=/"
-```
-
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
-
-```bash
-npm run reset-project
-```
-
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
-
-## Learn more
-
-To learn more about developing your project with Expo, look at the following resources:
-
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
-
-## Join the community
-
-Join our community of developers creating universal apps.
-
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+[MIT](LICENSE)
