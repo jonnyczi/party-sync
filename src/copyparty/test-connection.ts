@@ -150,10 +150,12 @@ async function probeSaf(sourceUri: string): Promise<boolean> {
 
 async function probeMediaLibrary(): Promise<boolean> {
   try {
-    // Lazy-require for the same reason as probeSaf.
-    const mod = await import('expo-media-library');
-    const perm = await mod.getPermissionsAsync(false, ['photo', 'video']);
-    return perm.status === 'granted';
+    // Not MediaLibrary.getPermissionsAsync: its aggregate status folds in
+    // ACCESS_MEDIA_LOCATION, so a user who declined location — or an install
+    // predating that permission — would fail a check that's only asking
+    // "can we read the camera roll?".
+    const { hasMediaReadPermission } = await import('../media/media-permission');
+    return await hasMediaReadPermission();
   } catch {
     return false;
   }

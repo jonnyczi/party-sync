@@ -72,7 +72,14 @@ Essentials:
 
 ## Testing against a copyparty server
 
-`tests/docker-compose.yml` runs `copyparty/ac:latest` on `:3923` with a single account `test:testpw` and a single volume `/w` mounted `A,test` (full access). `--no-mutagen --no-thumb` are set to keep startup fast; the compose healthcheck polls `GET /?reset=/._` until ready. The `copyparty-data` named volume persists between runs — do `docker compose -f tests/docker-compose.yml down -v` (or `npm run test:integration:down`) between runs if a test needs a clean server.
+`tests/docker-compose.yml` runs **two** `copyparty/ac:latest` servers, both with account `test:testpw` and volume `/w` mounted `A,test`, and both with `-e2dsa --dedup` so content dedup is genuinely exercised (without an index copyparty can only dedup from its in-memory registry, which made dedup tests pass for the wrong reason):
+
+- **`:3923`** — the default target for every test. Deliberately **without** `--usernames`, because `tests/integration/test-connection.test.ts` is a regression test for password-only auth and most tests build a `CopypartyClient` with no username. Also bind-mounts `tests/seed-data/` at `/w/_seed` so tests can drop files onto the server's filesystem out-of-band (as a user's rsync would) and assert they dedup once indexed; `--re-maxage 5` picks them up.
+- **`:3924`** — same but `--usernames`, covering the HTTP Basic path (`COPYPARTY_USERNAMES_URL`).
+
+`--no-mutagen --no-thumb` keep startup fast. Named volumes persist between runs; `npm run test:integration:down` (or `:fresh`, which chains down/up/test) wipes them.
+
+**Fixture determinism.** `writeRandomFile(path, size, seed)` XORs `seed` with a per-run salt pinned by `tests/integration/global-setup.ts`, so fixtures are identical *within* a run (the dedup tests need the same bytes twice) but differ *across* runs. Without this, `--dedup` plus the persistent volume would make run N+1 dedup against run N and break every test that expects a fresh upload. Set `COPYPARTY_TEST_SALT` to reproduce a specific run.
 
 **Automated (Node/vitest) integration tests.** `tests/integration/**/*.test.ts` hit the container over HTTP. `tests/integration/helpers.ts` is the single source of truth for connection details — it exports `COPYPARTY_URL` (default `http://127.0.0.1:3923`), `COPYPARTY_USER` (`test`), `COPYPARTY_PW` (`testpw`), plus `copypartyReachable()`, `withTempDir()`, `writeRandomFile()`, and `uniqueRemoteFolder()`. All three env vars are overridable — point the suite at a non-Docker server by exporting them before `npm run test:integration`. `vitest.integration.config.ts` has a 120s test/hook timeout because cold-start + dedup checks are slow.
 

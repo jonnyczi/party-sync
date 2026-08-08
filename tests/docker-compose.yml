@@ -1,4 +1,19 @@
 ---
+# Two servers so the suite covers both shapes people actually deploy.
+#
+# `copyparty` (3923) is the default target for every existing test. It runs
+# WITHOUT --usernames on purpose: tests/integration/test-connection.test.ts is a
+# regression test for password-only auth, and most tests build a CopypartyClient
+# with no username.
+#
+# `copyparty-usernames` (3924) mirrors a --usernames deployment so the HTTP Basic
+# path in src/copyparty/client.ts gets real coverage.
+#
+# Both index (-e2dsa) and dedup (--dedup). Without an up2k index copyparty can
+# only dedup out of its in-memory registry, which made "does dedup work?" tests
+# pass for the wrong reason and hid a real client bug (uploaded bytes differing
+# from the originals). --re-maxage picks up files dropped into ./seed-data by
+# tests that need a file to arrive out-of-band, the way a user's rsync would.
 services:
   copyparty:
     image: copyparty/ac:latest
@@ -7,6 +22,10 @@ services:
       - "3923:3923"
     volumes:
       - copyparty-data:/w
+      # Nested read-only-in-practice mount: seeded files must live in the SAME
+      # copyparty volume as the upload target, because the up2k index is
+      # per-volume. Host-owned so tests can clean up without sudo.
+      - ./seed-data:/w/_seed
     command:
       - "-p"
       - "3923"
@@ -16,6 +35,10 @@ services:
       - "test:testpw"
       - "-v"
       - "/w::A,test"
+      - "-e2dsa"
+      - "--dedup"
+      - "--re-maxage"
+      - "5"
       - "--no-mutagen"
       - "--no-thumb"
     environment:
@@ -24,8 +47,41 @@ services:
       test: ["CMD-SHELL", "wget --spider -q 127.0.0.1:3923/?reset=/._"]
       interval: 2s
       timeout: 2s
-      retries: 30
-      start_period: 5s
+      retries: 45
+      # -e2dsa rescans every folder at startup, so first response is slower.
+      start_period: 15s
+
+  copyparty-usernames:
+    image: copyparty/ac:latest
+    container_name: copyparty-test-usernames
+    ports:
+      - "3924:3923"
+    volumes:
+      - copyparty-usernames-data:/w
+    command:
+      - "-p"
+      - "3923"
+      - "-i"
+      - "0.0.0.0"
+      - "-a"
+      - "test:testpw"
+      - "-v"
+      - "/w::A,test"
+      - "--usernames"
+      - "-e2dsa"
+      - "--dedup"
+      - "--no-mutagen"
+      - "--no-thumb"
+    environment:
+      PYTHONUNBUFFERED: "1"
+    healthcheck:
+      # --usernames answers 401 to an anonymous probe; that still proves it's up.
+      test: ["CMD-SHELL", "wget -q -O - 127.0.0.1:3923/ 2>&1 | grep -q . || true"]
+      interval: 2s
+      timeout: 2s
+      retries: 45
+      start_period: 15s
 
 volumes:
   copyparty-data:
+  copyparty-usernames-data:

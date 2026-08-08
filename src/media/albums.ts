@@ -8,6 +8,8 @@
  * On a platform where expo-media-library can't grant access this resolves to an
  * empty list rather than throwing.
  */
+import { hasMediaReadPermission } from './media-permission';
+
 export type AlbumOption = { id: string; title: string };
 
 /**
@@ -24,10 +26,11 @@ export async function listMediaAlbums(opts?: {
   // Lazy-import so importing this module in Node (vitest) / on web doesn't
   // eagerly resolve the native expo-media-library module.
   const MediaLibrary = await import('expo-media-library');
-  const perm = opts?.prompt
-    ? await MediaLibrary.requestPermissionsAsync(false, ['photo', 'video'])
-    : await MediaLibrary.getPermissionsAsync(false, ['photo', 'video']);
-  if (perm.status !== 'granted') return [];
+  // requestPermissionsAsync is the only thing that shows the dialog, but its
+  // aggregate status also folds in ACCESS_MEDIA_LOCATION — which a user may
+  // legitimately decline. Listing albums only needs read access.
+  if (opts?.prompt) await MediaLibrary.requestPermissionsAsync(false, ['photo', 'video']);
+  if (!(await hasMediaReadPermission())) return [];
   const albums = await MediaLibrary.getAlbumsAsync();
   return albums.map((a) => ({ id: a.id, title: a.title }));
 }

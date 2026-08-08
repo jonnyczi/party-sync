@@ -25,6 +25,22 @@ declare class CopypartySha512Module extends NativeModule<CopypartySha512ModuleEv
    * deferred with the rest of iOS support.
    */
   walkTree(treeUri: string): Promise<SafWalkEntry[]>;
+
+  /**
+   * Map a source URI to the one that yields the file's *original* bytes.
+   *
+   * For MediaStore camera-roll URIs on Android 10+ this asks for the
+   * unredacted original, which requires ACCESS_MEDIA_LOCATION; without that
+   * permission Android zero-fills the EXIF GPS block in place, so the bytes we
+   * read differ from the file on disk while keeping the same length. Returns
+   * the input unchanged for file:// paths, SAF URIs, and when the permission
+   * isn't held.
+   *
+   * Resolve once per file and pass the result to `hashFileChunks`/`readRange`
+   * together: mixing a resolved and an unresolved URI for the same file would
+   * upload chunks that don't match the hashes we handshaked.
+   */
+  resolveReadUri(uri: string): Promise<string>;
 }
 
 export interface SafWalkEntry {

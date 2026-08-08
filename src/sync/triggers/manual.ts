@@ -6,6 +6,7 @@ import type { SqliteDb } from '../../db/adapter';
 import { getJob } from '../../db/jobs';
 import { getServer } from '../../db/servers';
 import type { JobRow, RunRow } from '../../db/types';
+import { hasMediaReadPermission } from '../../media/media-permission';
 import { getServerPassword } from '../../storage/secrets';
 import { runJob } from '../engine';
 import { withForegroundService } from '../foreground';
@@ -69,8 +70,12 @@ export async function runJobManual(
 export async function resolveWalker(job: JobRow): Promise<SourceWalker> {
   if (job.source_kind === 'saf') return safWalker;
   if (job.source_kind === 'media') {
-    const perm = await MediaLibrary.requestPermissionsAsync(false, ['photo', 'video']);
-    if (perm.status !== 'granted') {
+    // requestPermissionsAsync is what shows the system dialog; it also asks for
+    // ACCESS_MEDIA_LOCATION now that the manifest declares it. We gate on the
+    // read permission alone, though — declining location costs EXIF fidelity
+    // and server-side dedup, but must never stop a backup from running.
+    await MediaLibrary.requestPermissionsAsync(false, ['photo', 'video']);
+    if (!(await hasMediaReadPermission())) {
       throw new Error(
         'Camera-roll permission denied. Grant Photos & Videos in system settings.',
       );

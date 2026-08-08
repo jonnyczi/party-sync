@@ -16,6 +16,7 @@ import {
 } from 'react-native';
 
 import { AlbumPicker } from '@/components/album-picker';
+import { MediaLocationNotice } from '@/components/media-location-notice';
 import { RemotePathBrowser } from '@/components/remote-path-browser';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -578,6 +579,7 @@ export function JobForm({ jobId }: { jobId: number | null }) {
               <ThemedText style={styles.hint}>
                 Back up your whole camera roll or just one album.
               </ThemedText>
+              <MediaLocationNotice />
             </Field>
           )}
 

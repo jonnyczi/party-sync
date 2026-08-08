@@ -6,7 +6,10 @@
  * be a MediaStore row id.
  *
  * `uri` is the opaque handle passed to `FileSource.{hashFileChunks,readRange,size}`
- * — a content:// URI on Android, a filesystem path in Node tests.
+ * — a content:// URI on Android, a filesystem path in Node tests. It may carry
+ * per-read decoration that `localPath` must not (the media walker resolves
+ * MediaStore URIs to their unredacted-original form), so never persist it or
+ * use it as a key.
  */
 export interface WalkerEntry {
   localPath: string;

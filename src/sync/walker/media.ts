@@ -40,6 +40,14 @@ export interface MediaLibraryLike {
 export interface FileSizer {
   size(uri: string): Promise<number>;
 }
+/**
+ * Maps a MediaStore URI to the one that yields the file's original bytes.
+ * Resolved once per asset so a file's hash pass and its chunk reads can never
+ * disagree — see {@link WalkerEntry.uri}.
+ */
+export interface ReadUriResolver {
+  resolveReadUri(uri: string): Promise<string>;
+}
 
 const PAGE_SIZE = 200;
 
@@ -51,8 +59,10 @@ const PAGE_SIZE = 200;
  * `localPath` is the MediaStore content URI — it's the stable key across
  * runs (MediaStore ids survive normal device use; a full MediaStore wipe is
  * rare enough to punt on, and when it does happen every previous upload
- * looks new to us, which is a correctness-preserving failure mode). It's
- * also directly openable by the native module, so `uri` is the same value.
+ * looks new to us, which is a correctness-preserving failure mode). `uri` is
+ * the same value put through `resolveReadUri`, which asks MediaStore for the
+ * unredacted original — without that, Android zero-fills the EXIF GPS block on
+ * read, so we would hash and upload bytes that differ from the file on disk.
  *
  * Why NOT `asset.uri`: on Android 10+ scoped storage `asset.uri` is a
  * `file://` path that a sandboxed app can't open without
@@ -84,10 +94,11 @@ export const mediaWalker: SourceWalker = {
 export function createMediaWalker(
   library: MediaLibraryLike,
   sizer: FileSizer,
+  resolver: ReadUriResolver,
 ): SourceWalker {
   return {
     walk(sourceUri: string) {
-      return walkMedia(sourceUri, library, sizer);
+      return walkMedia(sourceUri, library, sizer, resolver);
     },
   };
 }
@@ -98,15 +109,19 @@ async function* walkWithLazyDeps(sourceUri: string): AsyncIterable<WalkerEntry> 
   const MediaLibrary = await import('expo-media-library');
   const CopypartySha512Mod = await import('../../../modules/copyparty-sha512');
   const CopypartySha512 = CopypartySha512Mod.default;
-  yield* walkMedia(sourceUri, MediaLibrary as unknown as MediaLibraryLike, {
-    size: (uri) => CopypartySha512.size(uri),
-  });
+  yield* walkMedia(
+    sourceUri,
+    MediaLibrary as unknown as MediaLibraryLike,
+    { size: (uri) => CopypartySha512.size(uri) },
+    { resolveReadUri: (uri) => CopypartySha512.resolveReadUri(uri) },
+  );
 }
 
 async function* walkMedia(
   sourceUri: string,
   library: MediaLibraryLike,
   sizer: FileSizer,
+  resolver: ReadUriResolver,
 ): AsyncIterable<WalkerEntry> {
   // Resolve the source_uri sentinel into an optional album filter.
   //   'all'           → whole library (album = undefined)
@@ -151,9 +166,18 @@ async function* walkMedia(
         // will see it again (or not) on the next run.
         continue;
       }
+      // Read through the unredacted-original URI where we're allowed to, but
+      // keep `localPath` the bare content URI so file_state keys don't churn.
+      let readUri = contentUri;
+      try {
+        readUri = await resolver.resolveReadUri(contentUri);
+      } catch {
+        // Resolution is an optimisation for byte fidelity, never a gate —
+        // fall back to the plain URI rather than dropping the asset.
+      }
       yield {
         localPath: contentUri,
-        uri: contentUri,
+        uri: readUri,
         relativePath: asset.filename,
         size,
         mtimeMs: asset.modificationTime,

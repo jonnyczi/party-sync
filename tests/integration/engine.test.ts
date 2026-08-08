@@ -261,7 +261,11 @@ describe('engine end-to-end against copyparty', () => {
           return (await stat(p)).size;
         },
       };
-      const walker = createMediaWalker(fakeLibrary, sizer);
+      // Identity resolver: the unredacted-original decoration is a MediaStore
+      // concern with no analogue against real files on disk.
+      const walker = createMediaWalker(fakeLibrary, sizer, {
+        resolveReadUri: async (uri: string) => uri,
+      });
 
       // FileSource that rewrites content:// URIs to real disk paths before
       // handing off to nodeFileSource. In production the native module

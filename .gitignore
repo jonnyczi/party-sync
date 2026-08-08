@@ -65,3 +65,9 @@ tmp/
 
 # IDE
 .idea/
+
+# Files staged into the dockerized copyparty's volume by integration tests.
+# The directory itself is tracked: docker-compose bind-mounts it, and if it
+# doesn't exist the daemon creates it root-owned.
+tests/seed-data/*
+!tests/seed-data/.gitkeep

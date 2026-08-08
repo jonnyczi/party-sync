@@ -1,8 +1,13 @@
 package expo.modules.copypartysha512
 
+import android.Manifest
+import android.annotation.SuppressLint
 import android.content.ContentResolver
 import android.content.Context
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
+import android.provider.MediaStore
 import android.provider.OpenableColumns
 import android.util.Base64
 import androidx.documentfile.provider.DocumentFile
@@ -21,6 +26,11 @@ private const val CHUNK_HASH_BYTES = 33
 private const val READ_BUFFER_BYTES = 64 * 1024
 
 private val B64_FLAGS = Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP
+
+/** Query parameter `MediaStore.setRequireOriginal` appends; used to detect a
+ *  URI we already decorated. Not exposed as public SDK API, so it's spelled
+ *  out here rather than referenced off MediaStore. */
+private const val PARAM_REQUIRE_ORIGINAL = "requireOriginal"
 
 class CopypartySha512Module : Module() {
   override fun definition() = ModuleDefinition {
@@ -43,6 +53,10 @@ class CopypartySha512Module : Module() {
     AsyncFunction("walkTree") { treeUri: String ->
       walkTree(treeUri)
     }
+
+    AsyncFunction("resolveReadUri") { uri: String ->
+      effectiveUri(parseUri(uri)).toString()
+    }
   }
 
   private val context: Context
@@ -60,10 +74,62 @@ class CopypartySha512Module : Module() {
     return if (parsed.scheme == null) Uri.fromFile(File(uri)) else parsed
   }
 
-  private fun openStream(uri: Uri): InputStream =
-    resolver.openInputStream(uri)
-      ?: throw HashException("could not open input stream for $uri")
+  /**
+   * The URI to open for byte-exact reads.
+   *
+   * On Android 10+ MediaProvider redacts the EXIF GPS block out of camera-roll
+   * bytes unless the caller holds ACCESS_MEDIA_LOCATION *and* asks for the
+   * original. Redaction zero-fills in place, so the length is unchanged but the
+   * content is not what's on disk — which yields different SHA-512 chunk
+   * hashes, a different copyparty wark, no dedup, and a backup that has
+   * silently lost the user's location data.
+   *
+   * Only MediaStore media URIs are decorated. SAF tree URIs and file:// paths
+   * pass through untouched.
+   *
+   * The permission is checked up front rather than by catching the failure per
+   * call, because `hashFileChunks` and `readRange` MUST agree: if one fell back
+   * to redacted bytes and the other didn't, we would POST chunk bodies that
+   * don't match the hashes already sent in the handshake.
+   */
+  private fun effectiveUri(uri: Uri): Uri {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return uri
+    if (!isMediaStoreUri(uri)) return uri
+    // Already decorated (the walker resolves once per asset) — don't re-wrap.
+    if (uri.getQueryParameter(PARAM_REQUIRE_ORIGINAL) != null) return uri
+    if (!hasMediaLocationPermission()) return uri
+    return MediaStore.setRequireOriginal(uri)
+  }
 
+  private fun isMediaStoreUri(uri: Uri): Boolean {
+    if (uri.scheme != ContentResolver.SCHEME_CONTENT) return false
+    val authority = uri.authority ?: return false
+    // Cross-user URIs are "<userId>@media".
+    return authority == MediaStore.AUTHORITY || authority.endsWith("@${MediaStore.AUTHORITY}")
+  }
+
+  @SuppressLint("InlinedApi") // ACCESS_MEDIA_LOCATION is a compile-time String constant
+  private fun hasMediaLocationPermission(): Boolean =
+    context.checkSelfPermission(Manifest.permission.ACCESS_MEDIA_LOCATION) ==
+      PackageManager.PERMISSION_GRANTED
+
+  private fun openStream(uri: Uri): InputStream =
+    try {
+      resolver.openInputStream(uri)
+        ?: throw HashException("could not open input stream for $uri")
+    } catch (e: UnsupportedOperationException) {
+      // requireOriginal is only ever set after the permission check said yes,
+      // so reaching here is anomalous. Failing this one file is correct —
+      // silently re-reading the redacted stream would desync the hashes we
+      // handshaked from the chunk bodies we upload.
+      throw HashException("original media bytes unavailable for $uri: ${e.message}")
+    } catch (e: SecurityException) {
+      throw HashException("not permitted to read $uri: ${e.message}")
+    }
+
+  /** Deliberately queries the *undecorated* URI: EXIF redaction zero-fills in
+   *  place and preserves length, so SIZE is the same either way, and passing an
+   *  unexpected query parameter to the provider's matcher buys nothing. */
   private fun fileSize(uri: Uri): Long {
     if (uri.scheme == "file") {
       val path = uri.path ?: throw HashException("file uri has no path: $uri")
@@ -78,7 +144,7 @@ class CopypartySha512Module : Module() {
 
   private fun hashFileChunks(uri: String, chunksize: Int): List<String> {
     if (chunksize <= 0) throw HashException("chunksize must be positive, got $chunksize")
-    val parsed = parseUri(uri)
+    val parsed = effectiveUri(parseUri(uri))
     return openStream(parsed).use { input ->
       val out = ArrayList<String>()
       val buf = ByteArray(READ_BUFFER_BYTES)
@@ -112,7 +178,7 @@ class CopypartySha512Module : Module() {
   private fun readRange(uri: String, car: Long, cdr: Long): ByteArray {
     if (car < 0 || cdr < car) throw HashException("invalid range: car=$car cdr=$cdr")
     val len = (cdr - car).toInt()
-    val parsed = parseUri(uri)
+    val parsed = effectiveUri(parseUri(uri))
     return openStream(parsed).use { input ->
       // InputStream.skip is allowed to short-skip; loop with a read fallback.
       var skipped = 0L

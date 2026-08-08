@@ -53,7 +53,7 @@
         {
           "photosPermission": "copyparty needs access to your photos to back them up to your server.",
           "savePhotosPermission": false,
-          "isAccessMediaLocationEnabled": false,
+          "isAccessMediaLocationEnabled": true,
           "granularPermissions": [
             "photo",
             "video"

@@ -13,6 +13,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:integration": "vitest run --config vitest.integration.config.ts",
+    "test:integration:fresh": "npm run test:integration:down && npm run test:integration:up && npm run test:integration",
     "test:integration:up": "docker compose -f tests/docker-compose.yml up -d --wait",
     "test:integration:down": "docker compose -f tests/docker-compose.yml down -v"
   },

@@ -1,5 +1,3 @@
-import * as MediaLibrary from 'expo-media-library';
-
 import { CopypartyClient } from '../../copyparty/client';
 import { nativeFileSource } from '../../copyparty/hash.native';
 import type { SqliteDb } from '../../db/adapter';
@@ -7,6 +5,7 @@ import { listJobs } from '../../db/jobs';
 import { getLatestRunForJob, recordSkippedRun } from '../../db/runs';
 import { getServer } from '../../db/servers';
 import type { JobRow } from '../../db/types';
+import { hasMediaReadPermission } from '../../media/media-permission';
 import { getServerPassword } from '../../storage/secrets';
 import { evaluateConstraints } from '../constraints';
 import { readConstraintState } from '../device-state';
@@ -133,8 +132,10 @@ async function runPeriodicJob(db: SqliteDb, job: JobRow): Promise<void> {
 async function resolveWalker(job: JobRow): Promise<SourceWalker> {
   if (job.source_kind === 'saf') return safWalker;
   if (job.source_kind === 'media') {
-    const perm = await MediaLibrary.getPermissionsAsync(false, ['photo', 'video']);
-    if (perm.status !== 'granted') {
+    // Deliberately not MediaLibrary.getPermissionsAsync: it AND-aggregates
+    // ACCESS_MEDIA_LOCATION, which a pre-existing install has never been asked
+    // for — that would report "not granted" and silently kill background sync.
+    if (!(await hasMediaReadPermission())) {
       throw new Error(
         'Camera-roll permission is not granted; skipping periodic run.',
       );

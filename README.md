@@ -26,6 +26,38 @@ LAN or anywhere else. No cloud, no Google services.
 - **Backup & restore** — export servers and jobs to an optionally encrypted file and import them on another device
 - **Plain `http://` and self-signed TLS** — LAN servers without certificates work out of the box; pin a certificate SHA-256 for self-signed HTTPS
 
+## Permissions
+
+The app asks for the minimum Android needs to do the job, and nothing is sent anywhere
+except the server you configure.
+
+| Permission | Why |
+| --- | --- |
+| Photos & videos (`READ_MEDIA_IMAGES`, `READ_MEDIA_VIDEO`) | Read the camera roll so it can be backed up. Folder-only jobs don't need it. |
+| Photo location (`ACCESS_MEDIA_LOCATION`) | Upload photos **exactly as they are**. Android strips the GPS tag out of any photo an app reads without this, so your backup would silently differ from the original — see below. |
+| Notifications (`POST_NOTIFICATIONS`) | Sync result alerts and the upload progress notification. Local only; no Firebase or Google services. |
+| Foreground service, wake lock, battery-optimization exemption | Keep long uploads and scheduled background syncs alive. |
+| Network state | Honour the Wi-Fi-only and Data-Saver constraints. |
+
+### Why a location permission
+
+This one reads alarmingly on the permission list, so: it does not let the app find out
+where you are. It stops Android from **editing your photos on the way out**. When an app
+reads a photo without `ACCESS_MEDIA_LOCATION`, Android blanks the GPS block inside the
+JPEG first. The file is the same length, so nothing looks wrong — but the bytes differ
+from the file on your device, which means the photo loses its location and your server
+can't tell it's the same photo it already has, so it stores a second copy.
+
+Declining is fine and the app keeps working. You'll see a notice on the job explaining
+that photos are being backed up without their location.
+
+**Upgrading from v0.6.0 or earlier:** photos backed up before this permission existed
+were stored without their location, and if a copy was already on the server they were
+saved under a `name-<timestamp>-<random>` filename. Photos backed up from now on are
+correct. To re-upload the older ones intact, delete and recreate the camera-roll job —
+anything already correct on the server is deduplicated rather than re-sent, so it costs
+hashing time, not bandwidth.
+
 ## Install
 
 Download the APK from the [latest release](https://github.com/jonnyczi/copyparty-client/releases/latest),

@@ -54,6 +54,18 @@ function fakeSizer(sizes: Record<string, number | Error>) {
   };
 }
 
+/** Identity by default — production decorates MediaStore URIs for unredacted
+ *  reads, but that's orthogonal to enumeration, which these tests cover. */
+function fakeResolver(map: Record<string, string | Error> = {}) {
+  return {
+    resolveReadUri: async (uri: string) => {
+      const v = map[uri];
+      if (v instanceof Error) throw v;
+      return v ?? uri;
+    },
+  };
+}
+
 async function collect<T>(iter: AsyncIterable<T>): Promise<T[]> {
   const out: T[] = [];
   for await (const v of iter) out.push(v);
@@ -78,7 +90,7 @@ describe('mediaWalker', () => {
       'content://media/external/video/media/2': 456_000_000,
     });
 
-    const walker = createMediaWalker(library, sizer);
+    const walker = createMediaWalker(library, sizer, fakeResolver());
     const out = await collect(walker.walk(MEDIA_SOURCE_ALL));
 
     expect(out).toEqual<WalkerEntry[]>([
@@ -123,7 +135,7 @@ describe('mediaWalker', () => {
       'content://media/external/images/media/2': 20,
     });
 
-    const walker = createMediaWalker(library, sizer);
+    const walker = createMediaWalker(library, sizer, fakeResolver());
     const out = await collect(walker.walk(MEDIA_SOURCE_ALL));
 
     expect(out.map((e) => e.localPath)).toEqual([
@@ -154,7 +166,7 @@ describe('mediaWalker', () => {
       'content://media/external/images/media/3': 30,
     });
 
-    const walker = createMediaWalker(library, sizer);
+    const walker = createMediaWalker(library, sizer, fakeResolver());
     const out = await collect(walker.walk(MEDIA_SOURCE_ALL));
 
     expect(out.map((e) => e.relativePath)).toEqual(['ok.jpg', 'also-ok.jpg']);
@@ -177,14 +189,14 @@ describe('mediaWalker', () => {
       'content://media/external/images/media/3': 10,
     });
 
-    const walker = createMediaWalker(library, sizer);
+    const walker = createMediaWalker(library, sizer, fakeResolver());
     const out = await collect(walker.walk(MEDIA_SOURCE_ALL));
 
     expect(out.map((e) => e.relativePath)).toEqual(['img.jpg']);
   });
 
   it('rejects unrecognized source_uri sentinels', async () => {
-    const walker = createMediaWalker(fakeLibrary([]), fakeSizer({}));
+    const walker = createMediaWalker(fakeLibrary([]), fakeSizer({}), fakeResolver());
     await expect(collect(walker.walk('garbage'))).rejects.toThrow(/unrecognized/);
   });
 
@@ -207,7 +219,7 @@ describe('mediaWalker', () => {
     );
     const sizer = fakeSizer({ 'content://media/external/images/media/1': 10 });
 
-    const walker = createMediaWalker(library, sizer);
+    const walker = createMediaWalker(library, sizer, fakeResolver());
     const out = await collect(walker.walk('album:cam'));
 
     expect(out.map((e) => e.relativePath)).toEqual(['cam.jpg']);
@@ -216,9 +228,61 @@ describe('mediaWalker', () => {
     expect(library.calls[0].album).toBe('cam');
   });
 
+  it('reads through the resolved URI but keys file_state on the bare one', async () => {
+    // The resolved form carries ?requireOriginal=1 so Android hands back
+    // unredacted EXIF. It must never reach localPath: that's the file_state
+    // key, and churning it would make every photo look new.
+    const bare = 'content://media/external/images/media/1';
+    const library = fakeLibrary([
+      {
+        assets: [
+          { id: '1', filename: 'geo.jpg', mediaType: 'photo', modificationTime: 1 },
+        ],
+        endCursor: 'cA',
+        hasNextPage: false,
+        totalCount: 1,
+      },
+    ]);
+    const walker = createMediaWalker(
+      library,
+      fakeSizer({ [bare]: 10 }),
+      fakeResolver({ [bare]: `${bare}?requireOriginal=1` }),
+    );
+
+    const [entry] = await collect(walker.walk(MEDIA_SOURCE_ALL));
+
+    expect(entry.localPath).toBe(bare);
+    expect(entry.uri).toBe(`${bare}?requireOriginal=1`);
+  });
+
+  it('falls back to the bare URI when resolution fails, without dropping the asset', async () => {
+    const bare = 'content://media/external/images/media/1';
+    const library = fakeLibrary([
+      {
+        assets: [
+          { id: '1', filename: 'geo.jpg', mediaType: 'photo', modificationTime: 1 },
+        ],
+        endCursor: 'cA',
+        hasNextPage: false,
+        totalCount: 1,
+      },
+    ]);
+    const walker = createMediaWalker(
+      library,
+      fakeSizer({ [bare]: 10 }),
+      fakeResolver({ [bare]: new Error('resolver blew up') }),
+    );
+
+    const out = await collect(walker.walk(MEDIA_SOURCE_ALL));
+
+    // Degraded fidelity beats a missing backup.
+    expect(out).toHaveLength(1);
+    expect(out[0].uri).toBe(bare);
+  });
+
   it('throws a clear error when the saved album no longer exists', async () => {
     const library = fakeLibrary([], [{ id: 'cam', title: 'Camera' }]);
-    const walker = createMediaWalker(library, fakeSizer({}));
+    const walker = createMediaWalker(library, fakeSizer({}), fakeResolver());
     await expect(collect(walker.walk('album:gone'))).rejects.toThrow(
       /no longer exists/,
     );

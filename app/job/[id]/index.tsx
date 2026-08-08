@@ -10,6 +10,7 @@ import {
   View,
 } from 'react-native';
 
+import { MediaLocationNotice } from '@/components/media-location-notice';
 import { RunProgress, phaseLabel } from '@/components/run-progress';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -161,6 +162,7 @@ export default function JobOverviewScreen() {
         }}
       />
       <ScrollView contentContainerStyle={styles.scroll}>
+        {job.source_kind === 'media' ? <MediaLocationNotice /> : null}
         {needsSource ? (
           <Pressable
             onPress={() => router.push(`/job/${jobId}/edit`)}
