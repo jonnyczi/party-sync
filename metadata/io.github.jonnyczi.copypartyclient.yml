@@ -11,6 +11,10 @@
 
 Categories:
   - Internet
+# The launcher label is just "Party Sync"; the listing name carries "copyparty"
+# so users searching F-Droid for their server software actually find the client.
+Name: Party Sync — copyparty backup
+Summary: Back up your phone to your own copyparty server
 License: MIT
 AuthorName: jonnyczi
 SourceCode: https://github.com/jonnyczi/copyparty-client

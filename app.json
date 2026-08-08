@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "copyparty-client",
+    "name": "Party Sync",
     "slug": "copyparty-client",
     "version": "0.7.0",
     "orientation": "portrait",
@@ -14,7 +14,7 @@
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
+        "backgroundColor": "#1b1f23",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
@@ -32,6 +32,9 @@
         "REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"
       ]
     },
+    "web": {
+      "favicon": "./assets/images/favicon.png"
+    },
     "plugins": [
       "expo-router",
       [
@@ -40,9 +43,9 @@
           "image": "./assets/images/splash-icon.png",
           "imageWidth": 200,
           "resizeMode": "contain",
-          "backgroundColor": "#ffffff",
+          "backgroundColor": "#1b1f23",
           "dark": {
-            "backgroundColor": "#000000"
+            "backgroundColor": "#1b1f23"
           }
         }
       ],
@@ -51,7 +54,7 @@
       [
         "expo-media-library",
         {
-          "photosPermission": "copyparty needs access to your photos to back them up to your server.",
+          "photosPermission": "Party Sync needs access to your photos to back them up to your server.",
           "savePhotosPermission": false,
           "isAccessMediaLocationEnabled": true,
           "granularPermissions": [

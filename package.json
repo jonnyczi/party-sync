@@ -9,6 +9,7 @@
     "android": "expo run:android",
     "ios": "expo run:ios",
     "bump-version": "node scripts/bump-version.mjs",
+    "gen-brand": "node scripts/gen-brand.mjs",
     "lint": "expo lint",
     "test": "vitest run",
     "test:watch": "vitest",

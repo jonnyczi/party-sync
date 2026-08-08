@@ -8,6 +8,7 @@ import { ThemedView } from '@/components/themed-view';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { APP_NAME } from '@/src/app-name';
 import {
   getResultNotificationsEnabled,
   setResultNotificationsEnabled,
@@ -49,7 +50,7 @@ export default function SettingsScreen() {
           // settings page can flip it, so offer the shortcut.
           Alert.alert(
             'Notifications disabled',
-            'Allow notifications for copyparty in system settings to get sync result alerts.',
+            `Allow notifications for ${APP_NAME} in system settings to get sync result alerts.`,
             perm === 'blocked'
               ? [
                   { text: 'Not now', style: 'cancel' },

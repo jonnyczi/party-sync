@@ -1,8 +1,17 @@
-# copyparty client for Android
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/brand/wordmark-dark.png">
+    <img src="docs/brand/wordmark-light.png" width="380" alt="Party Sync">
+  </picture>
+</p>
+
+# Party Sync — a copyparty client for Android
 
 Back up your phone to your own server. This app syncs folders and your camera roll
 from Android to a [copyparty](https://github.com/9001/copyparty) server — on your
 LAN or anywhere else. No cloud, no Google services.
+
+Party Sync is an independent client and is not affiliated with the copyparty project.
 
 [![Get it on GitHub Releases](https://img.shields.io/badge/get_it_on-GitHub_Releases-2da44e?logo=github)](https://github.com/jonnyczi/copyparty-client/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)

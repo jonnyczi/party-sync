@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="500" viewBox="0 0 1024 500">
+<defs><linearGradient id="amber" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffcc55"/><stop offset="0.2" stop-color="#ffcc00"/><stop offset="1" stop-color="#ff8800"/></linearGradient></defs>
+<rect width="1024" height="500" fill="#1b1f23"/>
+<g transform="translate(67.33,105.10) scale(0.76667)">
+  <rect x="136" y="72" width="158" height="178" rx="17" fill="#3a4149" stroke="#1b1f23" stroke-width="6"/>
+  <rect x="154" y="94" width="122" height="40" rx="8" fill="#272d33"/>
+  <rect x="166" y="111" width="47" height="6" rx="3" fill="#7d848b"/>
+  <circle cx="260" cy="114" r="6" fill="#ffcc00"/>
+  <rect x="154" y="143" width="122" height="40" rx="8" fill="#272d33"/>
+  <rect x="166" y="160" width="47" height="6" rx="3" fill="#7d848b"/>
+  <circle cx="260" cy="163" r="6" fill="#ffcc00"/>
+  <rect x="154" y="192" width="122" height="40" rx="8" fill="#272d33"/>
+  <rect x="166" y="209" width="47" height="6" rx="3" fill="#7d848b"/>
+  <circle cx="260" cy="212" r="6" fill="#ffcc00"/>
+  <rect x="28" y="90" width="132" height="214" rx="25" fill="#343b41" stroke="#1b1f23" stroke-width="9"/>
+  <rect x="39" y="111" width="110" height="172" rx="12" fill="url(#amber)"/>
+  <rect x="76" y="99" width="36" height="6" rx="3" fill="#7d848b"/>
+</g>
+<text x="355" y="250" font-family="DejaVu Sans, Liberation Sans, sans-serif" font-weight="bold" font-size="53" fill="#ECEDEE">Party Sync</text>
+<text x="355" y="301" font-family="DejaVu Sans, Liberation Sans, sans-serif" font-size="28" fill="#9BA1A6">Back up your phone to your own server</text>
+</svg>

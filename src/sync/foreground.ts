@@ -3,8 +3,13 @@ import { Platform } from 'react-native';
 import CopypartyNotify from '../../modules/copyparty-notify';
 import CopypartySync from '../../modules/copyparty-sync';
 
+import { APP_NAME } from '../app-name';
+
 import { acquireKeepAlive, releaseKeepAlive } from './keep-alive';
 
+// Channel id is a persisted identifier — renaming it would orphan the user's
+// existing notification settings, so it stays `copyparty-sync` regardless of
+// what the app is called.
 const CHANNEL_ID = 'copyparty-sync';
 // NotificationManagerCompat keys notifications by integer id; one fixed slot for
 // the single "sync active" notification we ever post.
@@ -37,7 +42,7 @@ async function showSyncNotification(jobName: string): Promise<void> {
   await CopypartyNotify.notify(
     CHANNEL_ID,
     NOTIF_ID,
-    'copyparty',
+    APP_NAME,
     `Syncing: ${jobName}`,
     true,
     null,
@@ -79,7 +84,7 @@ export async function withForegroundService<T>(
   try {
     if (Platform.OS === 'android' && CopypartySync) {
       serviceStarted = await CopypartySync.startForegroundSync(
-        'copyparty',
+        APP_NAME,
         `Syncing: ${jobName}`,
       );
     }

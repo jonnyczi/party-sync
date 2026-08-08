@@ -1,0 +1,34 @@
+Party Sync backs up your phone to a copyparty server you run yourself — on your
+LAN or anywhere else. Your photos and files go to your machine and nowhere else.
+There is no account, no cloud service, and no Google dependency: the app ships
+without Firebase or Play Services, and a CI gate fails the build if either ever
+reappears.
+
+Features
+
+* Folder and camera-roll sync jobs — back up any folder or your photo library.
+  Each job has its own server, remote path, and album scope.
+* Scheduled background sync — periodic sync every N minutes, with Wi-Fi-only,
+  Data Saver and charging-only constraints. A foreground service keeps long
+  uploads alive.
+* Setup health checklist — probes battery optimisation, background limits, Data
+  Saver and vendor quirks, with one-tap fixes so scheduled syncs actually run.
+* Fast, deduplicated uploads — uses copyparty's up2k protocol with content
+  hashing, so files the server already has are skipped instead of re-uploaded.
+* Photos uploaded unmodified — with location access granted, EXIF is preserved
+  byte-for-byte, so uploads dedup correctly and your metadata survives.
+* Run history and retry — every sync records per-file results and errors; retry
+  just the failed files with one tap.
+* Date-organised uploads — bucket photos into 2026/07/-style folders by
+  modification date.
+* Notifications without Google — per-job success and failure notifications built
+  on plain AndroidX.
+* Backup and restore — export servers and jobs to an optionally encrypted file
+  and import them on another device.
+* Plain http:// and self-signed TLS — LAN servers without certificates work out
+  of the box; pin a certificate SHA-256 for self-signed HTTPS.
+
+Requires a copyparty server (github.com/9001/copyparty). Party Sync is an
+independent client and is not affiliated with the copyparty project.
+
+Free software, MIT licensed. Source: github.com/jonnyczi/copyparty-client

@@ -11,7 +11,9 @@ import androidx.core.app.NotificationManagerCompat
  * its foreground service / worker. Mirrors the channel + styling used by
  * `modules/copyparty-notify` (same channel id, so the user sees one "Sync in
  * progress" category in system settings) — duplicated rather than shared to
- * avoid a cross-module Gradle dependency.
+ * avoid a cross-module Gradle dependency. The same applies to
+ * `res/drawable/ic_stat_copyparty.xml`: both modules carry their own generated
+ * copy so each resolves it through its own R class.
  */
 object SyncNotifications {
   const val CHANNEL_ID = "copyparty-sync"
@@ -38,7 +40,7 @@ object SyncNotifications {
   /** The ongoing/silent notification a foreground service is required to show. */
   fun ongoing(context: Context, title: String, text: String): Notification =
     NotificationCompat.Builder(context, CHANNEL_ID)
-      .setSmallIcon(android.R.drawable.stat_notify_sync)
+      .setSmallIcon(R.drawable.ic_stat_copyparty)
       .setContentTitle(title)
       .setContentText(text)
       .setStyle(NotificationCompat.BigTextStyle().bigText(text))
