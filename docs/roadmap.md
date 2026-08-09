@@ -102,13 +102,14 @@ Then the implementation:
 
 ## 4. Canonical mirror is behind 🟡 (housekeeping)
 
-The CI/CD pipeline work lives on the **GitHub mirror** (`github` remote,
-`github.com/jonnyczi/copyparty-client`), which is now **ahead** of the canonical
-self-hosted repo (`origin`, `dev.jonnyczi-systems.com`). They have **not** diverged
-— `origin/master` is a clean ancestor of `github/master`, so it's a fast-forward.
-When desired: `git push origin master` to bring the canonical repo up to date.
-(Left undone deliberately — pushing to the canonical remote wasn't part of the
-merge request.)
+The remotes were renamed since this was written, and the names here were backwards
+— following the old instruction would have pushed the wrong way. As of now:
+`origin` is **GitHub** (`github.com/jonnyczi/copyparty-client`), which `master`
+tracks and where CI and PRs live; `selfhosted` is `dev.jonnyczi-systems.com`.
+
+GitHub is **ahead** of the self-hosted repo, and they have not diverged, so it's a
+fast-forward. When desired: `git push selfhosted master --tags`. (Left undone
+deliberately — pushing to the self-hosted remote wasn't part of the merge request.)
 
 ---
 

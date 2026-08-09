@@ -8,30 +8,68 @@ import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import CopypartySync from '@/modules/copyparty-sync';
 import {
-  getMediaLocationPermission,
-  requestMediaLocationPermission,
+  getOriginalBytesState,
+  requestOriginalBytesAccess,
+  requestOriginalBytesAccessWithMediaRead,
 } from '@/src/media/media-permission';
 
+/** Camera-roll jobs vs Folder jobs — same defect, different explanation owed. */
+export type MediaLocationVariant = 'media' | 'folder';
+
+const COPY: Record<
+  MediaLocationVariant,
+  { title: string; body: string; action: string }
+> = {
+  media: {
+    title: 'Photos are backed up without location',
+    body:
+      'Android removes the GPS tag from photos this app reads unless you allow it. ' +
+      'Backed-up photos lose their location, and may upload a second copy instead of ' +
+      'being recognised as already on your server.',
+    action: 'Allow photo location',
+  },
+  folder: {
+    // A folder-backup job asking about photos looks like overreach unless the
+    // "even one you picked yourself" part is said out loud.
+    title: 'Photos in this folder lose their location',
+    body:
+      'Android blanks the GPS tag out of any photo an app reads — even a photo in a ' +
+      'folder you picked yourself. Those photos get backed up without their location, ' +
+      'and your server cannot tell they are the same photos it already has, so it ' +
+      'keeps a second copy.',
+    action: 'Allow photos to be read unedited',
+  },
+};
+
 /**
- * Shown on media jobs when ACCESS_MEDIA_LOCATION isn't granted.
+ * Shown on any job that may read photos, when the app can't get their original
+ * bytes.
  *
- * Without it Android zero-fills the EXIF GPS block in every geotagged photo we
- * read, so the backup silently differs from the originals and can never dedup
- * against a copy made any other way. That's invisible from inside the app —
- * uploads succeed, sizes match — so it needs a standing notice rather than a
- * one-off toast.
+ * Without ACCESS_MEDIA_LOCATION Android zero-fills the EXIF GPS block in every
+ * geotagged photo we read, so the backup silently differs from the originals and
+ * can never dedup against a copy made any other way. That's invisible from
+ * inside the app — uploads succeed, sizes match — so it needs a standing notice
+ * rather than a one-off toast.
  *
- * Deliberately does not re-prompt on its own: the request happens as part of
- * the normal media-permission flow, and after two denials Android stops showing
- * the dialog entirely, at which point the settings shortcut is the only way
- * back. Renders nothing when granted (or on a platform with no redaction).
+ * This applies to Folder jobs too, and device-dependently: an Android 16 / One UI
+ * handset redacts photos read through a user-picked folder, while a stock AOSP
+ * build at API 35 does not. Since we can't tell from here, the notice shows on
+ * every Folder job — noise on the devices that don't need it beats silent data
+ * loss on the ones that do.
+ *
+ * Deliberately does not re-prompt on its own: Android stops showing the dialog
+ * after two denials, at which point the settings shortcut is the only way back.
+ * Renders nothing once satisfied (or where nothing is redacted).
  */
-export function MediaLocationNotice({ onChange }: { onChange?: () => void } = {}) {
+export function MediaLocationNotice({
+  variant = 'media',
+  onChange,
+}: { variant?: MediaLocationVariant; onChange?: () => void } = {}) {
   const scheme = useColorScheme() ?? 'light';
   const [denied, setDenied] = useState(false);
 
   const refresh = useCallback(async () => {
-    setDenied((await getMediaLocationPermission()) === 'denied');
+    setDenied((await getOriginalBytesState()) === 'needs_permission');
   }, []);
 
   // The grant can land without any interaction of ours: Android silently
@@ -52,19 +90,27 @@ export function MediaLocationNotice({ onChange }: { onChange?: () => void } = {}
     return () => sub.remove();
   }, [refresh]);
 
-  const onGrant = useCallback(async () => {
-    const result = await requestMediaLocationPermission();
-    if (result === 'granted') {
+  const settle = useCallback(
+    (state: Awaited<ReturnType<typeof getOriginalBytesState>>) => {
+      if (state === 'needs_permission') return false;
       setDenied(false);
       onChange?.();
-      return;
-    }
-    // Either they declined again or Android suppressed the dialog; both are
-    // only recoverable from the system settings page.
+      return true;
+    },
+    [onChange],
+  );
+
+  const onGrant = useCallback(async () => {
+    // Stage one: the small ask — location only, no photo library.
+    if (settle(await requestOriginalBytesAccess())) return;
+
+    // Some builds won't grant it standalone. Offer the larger ask rather than
+    // dead-ending, but make the user opt into it knowingly.
     Alert.alert(
-      'Photo location access',
-      'Android will only hand over a photo’s location data with your permission. ' +
-        'Enable it under Permissions in system settings to back up photos exactly as they are.',
+      'Allow photos to be read unedited',
+      'Android would not grant this on its own. It can also be granted together with ' +
+        'access to your photos — the app does not browse your photo library for a folder ' +
+        'backup, it only needs this so Android stops blanking the GPS tag.',
       [
         { text: 'Not now', style: 'cancel' },
         {
@@ -73,29 +119,53 @@ export function MediaLocationNotice({ onChange }: { onChange?: () => void } = {}
             CopypartySync?.openAppSettings().catch(() => {});
           },
         },
+        {
+          text: 'Allow both',
+          onPress: () => {
+            void requestOriginalBytesAccessWithMediaRead().then((state) => {
+              if (settle(state)) return;
+              // Two refusals and Android stops showing the dialog at all, so
+              // system settings is the only remaining route.
+              Alert.alert(
+                'Still blocked',
+                'Android is no longer showing the permission prompt. Enable it under ' +
+                  'Permissions in system settings to back up photos exactly as they are.',
+                [
+                  { text: 'Not now', style: 'cancel' },
+                  {
+                    text: 'Open settings',
+                    onPress: () => {
+                      CopypartySync?.openAppSettings().catch(() => {});
+                    },
+                  },
+                ],
+              );
+            });
+          },
+        },
       ],
     );
-  }, [onChange]);
+  }, [settle]);
 
   if (!denied) return null;
 
   const icon = Colors[scheme].icon;
   const tint = Colors[scheme].tint;
 
+  const copy = COPY[variant];
+
   return (
     <View style={[styles.notice, { borderColor: icon }]}>
       <IconSymbol name="exclamationmark.triangle.fill" color={icon} size={16} />
       <View style={styles.body}>
-        <ThemedText style={styles.title}>Photos are backed up without location</ThemedText>
+        <ThemedText style={styles.title}>{copy.title}</ThemedText>
+        <ThemedText style={styles.text}>{copy.body}</ThemedText>
         <ThemedText style={styles.text}>
-          Android removes the GPS tag from photos this app reads unless you allow it. Backed-up
-          photos lose their location, and may upload a second copy instead of being recognised as
-          already on your server.
+          This applies to photos backed up from now on — it does not change copies already on
+          your server.
         </ThemedText>
         <Pressable onPress={onGrant} accessibilityRole="button">
-          <ThemedText style={[styles.action, { color: tint }]}>
-            Allow photo location
-          </ThemedText>
+          <ThemedText style={[styles.action, { color: tint }]}>{copy.action}</ThemedText>
         </Pressable>
       </View>
     </View>

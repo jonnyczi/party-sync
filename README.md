@@ -42,7 +42,7 @@ except the server you configure.
 
 | Permission | Why |
 | --- | --- |
-| Photos & videos (`READ_MEDIA_IMAGES`, `READ_MEDIA_VIDEO`) | Read the camera roll so it can be backed up. Folder-only jobs don't need it. |
+| Photos & videos (`READ_MEDIA_IMAGES`, `READ_MEDIA_VIDEO`) | Read the camera roll so it can be backed up. Folder jobs run without it. |
 | Photo location (`ACCESS_MEDIA_LOCATION`) | Upload photos **exactly as they are**. Android strips the GPS tag out of any photo an app reads without this, so your backup would silently differ from the original — see below. |
 | Notifications (`POST_NOTIFICATIONS`) | Sync result alerts and the upload progress notification. Local only; no Firebase or Google services. |
 | Foreground service, wake lock, battery-optimization exemption | Keep long uploads and scheduled background syncs alive. |
@@ -57,14 +57,36 @@ JPEG first. The file is the same length, so nothing looks wrong — but the byte
 from the file on your device, which means the photo loses its location and your server
 can't tell it's the same photo it already has, so it stores a second copy.
 
-Declining is fine and the app keeps working. You'll see a notice on the job explaining
-that photos are being backed up without their location.
+**This affects folder jobs too, on some devices.** A folder job pointed at `DCIM/Camera`
+reads photos through a folder you picked yourself, and you might reasonably expect that to
+be exempt — but it isn't, everywhere. On a Galaxy Z Fold 7 running Android 16 those reads
+are blanked exactly like camera-roll reads; on a stock Android 15 build they aren't. Since
+the app can't tell which kind of device it's on, it shows the notice on every folder job.
+If yours is one that doesn't need it, granting costs nothing and declining costs nothing.
 
-**Upgrading from v0.6.0 or earlier:** photos backed up before this permission existed
-were stored without their location, and if a copy was already on the server they were
-saved under a `name-<timestamp>-<random>` filename. Photos backed up from now on are
-correct. To re-upload the older ones intact, delete and recreate the camera-roll job —
-anything already correct on the server is deduplicated rather than re-sent, so it costs
+Declining is fine and the app keeps working — every file is still backed up, in full, at
+the right size. You'll see a standing notice on any job that may read photos, with a
+one-tap way to change your mind later.
+
+**Upgrading from v0.6.0 or earlier:** geotagged photos backed up before this permission
+existed were stored with their GPS tag blanked out. Only geotagged photos are affected;
+everything else was always byte-exact.
+
+**Don't just delete and recreate the job to fix them.** The blanked copy is already on
+your server under the photo's normal filename, and a corrected re-upload is a *different
+file* as far as copyparty is concerned — it can't deduplicate, the filename is taken, so
+it gets stored alongside as `name-<timestamp>-<random>`. You end up with two copies of
+every affected photo instead of one fixed copy.
+
+If you want the originals on the server, do it in this order:
+
+1. Delete the affected files **on the server** — the blanked copies, plus any
+   `-<timestamp>-<random>` renames from earlier runs.
+2. Then delete and recreate the job. Recreating is what clears the app's record of what
+   it has already sent; without it the app skips anything whose size and modification time
+   are unchanged, and blanking the GPS tag changes neither.
+
+Anything already correct on the server is deduplicated rather than re-sent, so this costs
 hashing time, not bandwidth.
 
 ## Install

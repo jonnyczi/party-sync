@@ -69,3 +69,61 @@ export async function requestMediaLocationPermission(): Promise<MediaLocationPer
   const result = await PermissionsAndroid.request(perm);
   return result === PermissionsAndroid.RESULTS.GRANTED ? 'granted' : 'denied';
 }
+
+/**
+ * Whether reads return the file's original bytes.
+ *
+ * The single predicate behind the notice, for both job kinds. Keeping it in one
+ * place matters more than it looks: the request flow below has two stages, and
+ * if the component recomputed "am I done?" separately from what the request
+ * returns, "granted but still redacted" and "not granted" would drift apart.
+ */
+export type OriginalBytesState = 'ok' | 'needs_permission' | 'unsupported';
+
+export async function getOriginalBytesState(): Promise<OriginalBytesState> {
+  const perm = await getMediaLocationPermission();
+  if (perm === 'unsupported') return 'unsupported';
+  return perm === 'granted' ? 'ok' : 'needs_permission';
+}
+
+/**
+ * Stage one of the opt-in: ask for ACCESS_MEDIA_LOCATION on its own.
+ *
+ * Folder jobs are affected by redaction too — on Android 16 / One UI a photo
+ * read through a folder the user picked themselves comes back with its GPS
+ * block blanked, though a stock AOSP build at API 35 does not do this. So the
+ * ask has to reach folder jobs, but a folder backup has no business requesting
+ * the whole photo library, and the permission is holdable on its own (verified:
+ * granted while READ_MEDIA_IMAGES is denied). Try the small ask first.
+ */
+export async function requestOriginalBytesAccess(): Promise<OriginalBytesState> {
+  const current = await getOriginalBytesState();
+  if (current !== 'needs_permission') return current;
+
+  await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.ACCESS_MEDIA_LOCATION);
+  return getOriginalBytesState();
+}
+
+/**
+ * Stage two, offered only after stage one failed: request media read alongside
+ * the location permission, because some builds will not grant the latter on its
+ * own. Deliberately excludes READ_MEDIA_VIDEO — a folder job needs no video
+ * access, and over-asking is exactly what makes this feel like an escalation.
+ *
+ * Not a rare fallback: measured on a Galaxy Z Fold 7 / Android 16, the bare
+ * request above is refused *silently* — no system dialog at all — and only this
+ * combined request succeeds. On a stock AVD at API 35 stage one suffices. Keep
+ * both; neither is dead code.
+ */
+export async function requestOriginalBytesAccessWithMediaRead(): Promise<OriginalBytesState> {
+  const current = await getOriginalBytesState();
+  if (current !== 'needs_permission') return current;
+
+  const P = PermissionsAndroid.PERMISSIONS;
+  const read =
+    typeof Platform.Version === 'number' && Platform.Version >= 33
+      ? P.READ_MEDIA_IMAGES
+      : P.READ_EXTERNAL_STORAGE;
+  await PermissionsAndroid.requestMultiple([read, P.ACCESS_MEDIA_LOCATION]);
+  return getOriginalBytesState();
+}

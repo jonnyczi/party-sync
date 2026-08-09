@@ -553,6 +553,9 @@ export function JobForm({ jobId }: { jobId: number | null }) {
                   {decodeURIComponent(sourceUri)}
                 </ThemedText>
               ) : null}
+              {/* Only once a folder is picked — warning about photos in a folder
+                  that doesn't exist yet reads as a scare. */}
+              {sourceUri ? <MediaLocationNotice variant="folder" /> : null}
             </Field>
           ) : (
             <Field label="Camera roll scope">

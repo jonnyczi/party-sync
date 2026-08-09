@@ -162,7 +162,9 @@ export default function JobOverviewScreen() {
         }}
       />
       <ScrollView contentContainerStyle={styles.scroll}>
-        {job.source_kind === 'media' ? <MediaLocationNotice /> : null}
+        {/* Both kinds: a Folder job over DCIM is redacted exactly like a
+            camera-roll one on the devices that redact at all. */}
+        <MediaLocationNotice variant={job.source_kind === 'media' ? 'media' : 'folder'} />
         {needsSource ? (
           <Pressable
             onPress={() => router.push(`/job/${jobId}/edit`)}

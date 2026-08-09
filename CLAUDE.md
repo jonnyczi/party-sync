@@ -70,6 +70,39 @@ Essentials:
 - After `expo run:android` the app may not stay foregrounded; bring it up with `adb shell monkey -p io.github.jonnyczi.copypartyclient -c android.intent.category.LAUNCHER 1`.
 - Quick screenshot for visual checks: `adb exec-out screencap -p | magick png:- -resize 50% -quality 80 tmp/shot.jpg`, then Read the JPEG (the downscale cuts vision tokens ~4×; `magick` comes from the devShell).
 
+**The emulator cannot reproduce EXIF-GPS redaction on folder (SAF) jobs.** Android blanks
+the GPS block out of photos an app reads without `ACCESS_MEDIA_LOCATION`, in place, so the
+file length is unchanged and only a byte comparison reveals it. Whether that applies to
+reads through a user-picked SAF folder is **device-dependent**: measured yes on a Galaxy
+Z Fold 7 / Android 16, measured no on a stock AVD at API 35 (a fresh folder job there
+dedupes a geotagged photo with every media permission revoked). So an emulator run showing
+"it dedupes" proves nothing about this bug — verify on a real OEM handset. Camera-roll
+(MediaStore) jobs *are* reproducible on the emulator.
+
+On-device check, against a copyparty that already holds the original:
+
+```
+adb shell sha256sum /sdcard/DCIM/Camera/<file>          # what's on disk
+curl -u USER:PW -O "http://<host>/<path>/<file>"        # what the app sent
+cmp -l original.jpg uploaded.jpg | head                 # differing bytes zeroed, early in the file
+```
+
+A cluster of zeroed bytes a few hundred bytes in is the EXIF GPS IFD, i.e. redaction.
+
+Requesting `ACCESS_MEDIA_LOCATION` on its own is also device-dependent: granted with no
+dialog on the AVD, refused **silently** on the Fold 7 (no dialog either), where only a
+combined `[READ_MEDIA_IMAGES, ACCESS_MEDIA_LOCATION]` request works. Hence the two-stage
+flow in `src/media/media-permission.ts` — both stages are live paths.
+
+To test on a physical phone without disturbing a real install, build the debug APK with
+`applicationIdSuffix ".devtest"` added to the debug buildType in `android/app/build.gradle`
+(gitignored, so the edit is throwaway) and `-PreactNativeArchitectures=arm64-v8a`. It then
+installs *alongside* the release build instead of needing the release key, and never risks
+the app's SQLite — losing `file_state` would trigger a full re-upload. Reach the host's test
+copyparty and Metro over USB with `adb reverse`, and note that on a foldable
+`adb exec-out screencap -p` corrupts the PNG with a multiple-displays warning unless you
+pass `-d <displayId>`.
+
 ## Testing against a copyparty server
 
 `tests/docker-compose.yml` runs **two** `copyparty/ac:latest` servers, both with account `test:testpw` and volume `/w` mounted `A,test`, and both with `-e2dsa --dedup` so content dedup is genuinely exercised (without an index copyparty can only dedup from its in-memory registry, which made dedup tests pass for the wrong reason):
