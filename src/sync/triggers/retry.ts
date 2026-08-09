@@ -61,6 +61,7 @@ export async function retryRunFailures(
       job.id,
       'retry',
     ),
+    defaultProgressBus,
   );
   await notifyRunResult(db, result, job);
   return result;

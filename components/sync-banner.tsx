@@ -59,8 +59,12 @@ export function SyncBanner() {
         </ThemedText>
       </View>
       <View style={styles.counters}>
+        {/* Counted against the work list, not everything walked — the same
+            denominator the percentage beside it uses. On a mostly-synced job
+            `scanned` is dominated by skips that can never increment `uploaded`,
+            so "10/120" read as stalled when the run was in fact 33% done. */}
         <ThemedText style={[styles.counter, { color: onAccent }]}>
-          {run.counters.uploaded}/{run.counters.scanned}
+          {run.counters.uploaded}/{run.totalFiles}
         </ThemedText>
         {run.counters.failed > 0 ? (
           <ThemedText style={[styles.counter, styles.failed, { color: onAccent }]}>

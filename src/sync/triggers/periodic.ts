@@ -114,6 +114,7 @@ async function runPeriodicJob(db: SqliteDb, job: JobRow): Promise<void> {
       job.id,
       'periodic',
     ),
+    defaultProgressBus,
   );
   // Best-effort: a failed notification must not abort the periodic loop.
   try {

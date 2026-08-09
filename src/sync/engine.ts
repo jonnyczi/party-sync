@@ -56,9 +56,11 @@ export interface EngineOptions {
  * run. `rehash_interval_days` is recorded on the job but not yet acted upon
  * — the re-hash path lands in phase 8 along with delete-propagation.
  *
- * Throughput: the run is two phases. A **scan** pass drains the walker into an
- * array (exact `totalFiles`/`totalBytes`), then an **upload** pass runs up to
- * `job.max_concurrency` files in parallel via a fixed-size worker pool.
+ * Throughput: the run is two phases. A **scan** pass drains the walker,
+ * short-circuiting files whose (size, mtime) still matches `file_state`, into
+ * an array of files that genuinely need work (exact `totalFiles`/`totalBytes`
+ * for that work, not for everything walked). Then an **upload** pass runs up to
+ * `job.max_concurrency` of them in parallel via a fixed-size worker pool.
  */
 export async function runJob(
   opts: EngineOptions,
@@ -114,41 +116,40 @@ export async function runJob(
     progress.setPhase('scanning');
     const existing = await loadFileState(opts.db, jobId);
 
-    // Scan pass: drain the walker into an array for an exact denominator.
-    // Entries are tiny (uri, path, size, mtime) so even a 50k-asset camera
-    // roll is fine in memory.
+    // Scan pass: drain the walker into an array of files that actually need
+    // work. Entries are tiny (uri, path, size, mtime) so even a 50k-asset
+    // camera roll is fine in memory.
+    //
+    // The (size, mtime) skip decision happens HERE rather than per-file in the
+    // upload phase, because it is what makes the denominator honest: a job
+    // where 9,900 of 10,000 files are already synced used to publish all 10,000
+    // as the total and then race the bar to 97% in seconds, which made the
+    // progress bar and every ETA derived from it meaningless. `existing` is
+    // already loaded above, so this costs one Map lookup per entry.
     const entries: WalkerEntry[] = [];
     let totalBytes = 0;
     for await (const entry of opts.walker.walk(job.source_uri)) {
       if (runControl.isCancelRequested(runId)) break;
       // Retry-failed scopes the run to a prior run's failed files.
       if (opts.filterPaths && !opts.filterPaths.has(entry.localPath)) continue;
+      // `scanned` counts everything walked, so run history keeps its meaning.
+      scanned++;
+      if (isAlreadySynced(existing.get(entry.localPath), entry)) {
+        skipped++;
+        continue;
+      }
       entries.push(entry);
       totalBytes += entry.size;
     }
-    scanned = entries.length;
-    progress.bumpCounters({ scanned });
+    progress.bumpCounters({ scanned, skipped });
     progress.setTotals({ totalFiles: entries.length, totalBytes });
     // Persist the scan result immediately so a DB-backed screen shows the
-    // denominator while the upload phase runs.
+    // denominator (and the skip count) while the upload phase runs.
     await persistCounters(true);
 
     progress.setPhase('uploading');
 
     const processEntry = async (entry: WalkerEntry): Promise<void> => {
-      const prior = existing.get(entry.localPath);
-      if (
-        prior &&
-        prior.uploaded_at !== null &&
-        prior.size === entry.size &&
-        prior.mtime_ms === entry.mtimeMs
-      ) {
-        skipped++;
-        progress.bumpCounters({ skipped: 1 });
-        progress.advanceUploaded(entry.size);
-        return;
-      }
-
       const name = basename(entry.relativePath);
       // Date modes flatten the local subfolder structure into Y/M/D buckets;
       // 'flat' keeps the file's original relative directory.
@@ -298,6 +299,24 @@ async function loadFileState(
   const m = new Map<string, FileStateRow>();
   for (const r of rows) m.set(r.local_path, r);
   return m;
+}
+
+/**
+ * Cheap "nothing to do" test: we uploaded this exact path before and neither
+ * its size nor its mtime has moved since. Deliberately does not hash — that is
+ * the whole point of the short-circuit. `uploaded_at === null` means a prior
+ * run hashed the file but never finished sending it, so it still needs work.
+ */
+function isAlreadySynced(
+  prior: FileStateRow | undefined,
+  entry: WalkerEntry,
+): boolean {
+  return (
+    prior !== undefined &&
+    prior.uploaded_at !== null &&
+    prior.size === entry.size &&
+    prior.mtime_ms === entry.mtimeMs
+  );
 }
 
 function classifyErrorPhase(e: unknown): ErrorPhase {

@@ -8,6 +8,17 @@ declare class CopypartySyncModule extends NativeModule {
    *  plain notification. */
   startForegroundSync(title: string, text: string): Promise<boolean>;
 
+  /** Refresh the running service's notification text (live speed / ETA) in
+   *  place. Re-posting the same notification id is the sanctioned way to update
+   *  a foreground-service notification — the dataSync type binding lives on the
+   *  service, not the notification.
+   *
+   *  Added after the original start/stop pair, so — like
+   *  `areNotificationsEnabled` — a binary predating it leaves the property
+   *  undefined and a JS-only reload will not pick it up. Call it as
+   *  `CopypartySync?.updateForegroundSync?.(…)`. */
+  updateForegroundSync(title: string, text: string): Promise<void>;
+
   /** Stop the foreground service; its notification is removed with it.
    *  Idempotent — stopping a non-running service is a no-op. */
   stopForegroundSync(): Promise<void>;

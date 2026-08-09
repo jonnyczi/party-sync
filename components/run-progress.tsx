@@ -22,7 +22,10 @@ export function RunProgress({
   maxFiles?: number;
 }) {
   const scheme = useColorScheme() ?? 'light';
-  const { etaMs, rateBytesPerSec } = useEta(
+  // Speed comes from wireBytes (real throughput); the bar and ETA from
+  // uploadedBytes (wire + dedup). See src/sync/rate-estimator.ts.
+  const estimate = useEta(
+    run.wireBytes,
     run.uploadedBytes,
     run.totalBytes,
     run.startedAt,
@@ -31,8 +34,8 @@ export function RunProgress({
     run.totalBytes > 0
       ? Math.min(100, Math.round((run.uploadedBytes / run.totalBytes) * 100))
       : 0;
-  const eta = formatEta(etaMs);
-  const rate = formatRate(rateBytesPerSec);
+  const eta = formatEta(estimate);
+  const rate = formatRate(estimate.rateBytesPerSec);
 
   return (
     <View style={styles.body}>

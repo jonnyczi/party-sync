@@ -2,6 +2,7 @@ package expo.modules.copypartysync
 
 import android.content.Context
 import android.util.Log
+import androidx.core.app.NotificationManagerCompat
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.ReactContext
 import com.facebook.react.bridge.UiThreadUtil
@@ -44,6 +45,31 @@ class CopypartySyncModule : Module() {
       } catch (t: Throwable) {
         Log.w(TAG, "foreground service start refused", t)
         false
+      }
+    }
+
+    /**
+     * Refresh the running service's notification text (live speed / ETA)
+     * without restarting the service. Re-posting the same notification id is
+     * the sanctioned way to update a foreground-service notification: the
+     * FOREGROUND_SERVICE_TYPE_DATA_SYNC binding lives on the *service*, not on
+     * the notification, so it survives untouched.
+     *
+     * No-op-safe: if the service isn't running this posts a stray ongoing
+     * notification, so JS only calls it while it believes the service is up,
+     * and the run's teardown clears the same id either way.
+     */
+    AsyncFunction("updateForegroundSync") { title: String, text: String ->
+      try {
+        SyncNotifications.ensureChannel(context)
+        NotificationManagerCompat.from(context).notify(
+          SyncForegroundService.NOTIF_ID,
+          SyncNotifications.ongoing(context, title, text),
+        )
+      } catch (t: Throwable) {
+        // A notification must never fail a sync (POST_NOTIFICATIONS denied,
+        // rate limiting, …). Log and carry on.
+        Log.w(TAG, "foreground notification update failed", t)
       }
     }
 

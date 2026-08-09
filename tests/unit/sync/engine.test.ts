@@ -97,6 +97,49 @@ describe('engine.runJob', () => {
     expect(server.chunkPosts).toBe(0);
   });
 
+  it('excludes skipped files from the progress totals but still scans them', async () => {
+    // The regression this pins: the totals used to cover every walked file, so
+    // a mostly-synced job raced the bar to ~100% on skips alone and every ETA
+    // derived from it was meaningless. Totals must describe real work only.
+    const done = makeEntry('already.bin', 900);
+    const work = makeEntry('fresh.bin', 100);
+    await db.runAsync(
+      `INSERT INTO file_state (job_id, local_path, size, mtime_ms, wark, last_hashed_at, uploaded_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [jobId, done.localPath, done.size, done.mtimeMs, 'prior-wark', 1000, 2000],
+    );
+
+    const server = makeFakeServer([work]);
+    const progress = new ProgressBus();
+    const totals: { totalFiles: number; totalBytes: number }[] = [];
+    const origSetTotals = progress.setTotals.bind(progress);
+    progress.setTotals = (t) => {
+      totals.push(t);
+      origSetTotals(t);
+    };
+
+    const run = await runJob(
+      {
+        db,
+        walker: fakeWalker([done, work]),
+        client: server.client,
+        fileSource: makeFileSource([work]),
+        progress,
+        sleep: noSleep,
+      },
+      jobId,
+    );
+
+    // Only the file that needs work is in the denominator...
+    expect(totals).toEqual([{ totalFiles: 1, totalBytes: work.size }]);
+    // ...but run history still accounts for everything walked.
+    expect(run.files_scanned).toBe(2);
+    expect(run.files_skipped).toBe(1);
+    expect(run.files_uploaded).toBe(1);
+    // The skipped file never reached the upload path.
+    expect(server.handshakes).toBe(2); // initial + re-handshake, for fresh.bin only
+  });
+
   it('re-uploads when file_state exists but size changed', async () => {
     const entry = makeEntry('c.bin', MIB + 1);
     await db.runAsync(

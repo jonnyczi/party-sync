@@ -35,11 +35,23 @@ export interface ActiveRunSnapshot {
   totalBytes: number;
   /**
    * Overall progress-bar numerator: bytes "accounted for" so far — actually
-   * uploaded over the wire (via `updateFileBytes`) plus deduped (`recordDedup`)
-   * and skipped (`advanceUploaded`) bytes. Reaches `totalBytes` when every file
-   * has been processed, so a re-run of an already-synced job still fills the bar.
+   * uploaded over the wire (via `updateFileBytes`) plus deduped
+   * (`recordDedup`). Reaches `totalBytes` when every file in the work list has
+   * been processed. Files skipped on (size, mtime) never enter the work list at
+   * all (the engine filters them during the scan pass), so they contribute to
+   * neither this nor `totalBytes`.
+   *
+   * NOT a throughput numerator — dedup credits whole files in one lump. Use
+   * {@link wireBytes} for anything that measures speed.
    */
   uploadedBytes: number;
+  /**
+   * Bytes that genuinely crossed the wire as chunk POSTs. Advances only via
+   * `updateFileBytes`, never from dedup, so `Δ wireBytes / Δt` is real upload
+   * throughput. Split out from `uploadedBytes` because deriving a rate from the
+   * latter reported ~GiB/s whenever a large file deduped.
+   */
+  wireBytes: number;
   /** Live tally of bytes the server already had (the "saved via dedup" stat). */
   dedupedBytes: number;
   counters: RunCountersSnapshot;
@@ -101,6 +113,7 @@ export class ProgressBus {
         totalFiles: 0,
         totalBytes: 0,
         uploadedBytes: 0,
+        wireBytes: 0,
         dedupedBytes: 0,
         counters: emptyCounters(),
         activeFiles: [],
@@ -134,9 +147,10 @@ export class ProgressBus {
   }
 
   /**
-   * Update an in-flight file's uploaded byte count. The positive delta versus
-   * its previous value advances the run-level `uploadedBytes`. No-op if the
-   * file is no longer in flight (a late progress callback after `endFile`).
+   * Update an in-flight file's uploaded byte count. The delta versus its
+   * previous value advances both `uploadedBytes` and `wireBytes` — this is the
+   * only mutator that touches the latter. No-op if the file is no longer in
+   * flight (a late progress callback after `endFile`).
    */
   updateFileBytes(localPath: string, bytesUploaded: number): void {
     const run = this.snapshot.activeRun;
@@ -148,6 +162,7 @@ export class ProgressBus {
       activeRun: {
         ...run,
         uploadedBytes: run.uploadedBytes + delta,
+        wireBytes: run.wireBytes + delta,
         activeFiles: run.activeFiles.map((f) =>
           f.localPath === localPath ? { ...f, bytesUploaded } : f,
         ),
@@ -164,21 +179,9 @@ export class ProgressBus {
   }
 
   /**
-   * Advance the overall `uploadedBytes` by bytes that never crossed the wire
-   * as chunk POSTs but are nonetheless "done" — the full size of a skipped
-   * (size+mtime match) file — so the progress bar still completes.
-   */
-  advanceUploaded(delta: number): void {
-    if (delta <= 0) return;
-    this.withActive((run) => ({
-      ...run,
-      uploadedBytes: run.uploadedBytes + delta,
-    }));
-  }
-
-  /**
    * Record bytes the server already had (dedup): advances the overall bar AND
-   * the live `dedupedBytes` tally shown as "saved via dedup".
+   * the live `dedupedBytes` tally shown as "saved via dedup". Deliberately
+   * leaves `wireBytes` alone — these bytes never left the phone.
    */
   recordDedup(delta: number): void {
     if (delta <= 0) return;

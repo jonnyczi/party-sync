@@ -54,6 +54,7 @@ export async function runJobManual(
       jobId,
       'manual',
     ),
+    defaultProgressBus,
   );
   await notifyRunResult(db, run, job);
   return run;

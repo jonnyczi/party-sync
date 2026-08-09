@@ -27,6 +27,7 @@ describe('ProgressBus', () => {
       totalFiles: 0,
       totalBytes: 0,
       uploadedBytes: 0,
+      wireBytes: 0,
       dedupedBytes: 0,
       activeFiles: [],
     });
@@ -76,6 +77,8 @@ describe('ProgressBus', () => {
     snap = bus.getSnapshot().activeRun!;
     expect(snap.uploadedBytes).toBe(2048);
     expect(snap.activeFiles.map((f) => f.localPath)).toEqual(['b.bin']);
+    // Every one of those bytes really crossed the wire.
+    expect(snap.wireBytes).toBe(2048);
   });
 
   it('startFile replaces any prior entry for the same path', () => {
@@ -97,23 +100,16 @@ describe('ProgressBus', () => {
     expect(bus.getSnapshot().activeRun!.uploadedBytes).toBe(0);
   });
 
-  it('advanceUploaded fills the bar for skipped bytes without touching dedup', () => {
-    const bus = new ProgressBus();
-    bus.startRun({ runId: 2, jobId: 1, trigger: 'manual', startedAt: 0 });
-    bus.advanceUploaded(500);
-    bus.advanceUploaded(-10); // ignored
-    const snap = bus.getSnapshot().activeRun!;
-    expect(snap.uploadedBytes).toBe(500);
-    expect(snap.dedupedBytes).toBe(0);
-  });
-
-  it('recordDedup advances both the bar and the dedup tally', () => {
+  it('recordDedup advances the bar and the dedup tally but never wireBytes', () => {
     const bus = new ProgressBus();
     bus.startRun({ runId: 2, jobId: 1, trigger: 'manual', startedAt: 0 });
     bus.recordDedup(800);
     const snap = bus.getSnapshot().activeRun!;
     expect(snap.uploadedBytes).toBe(800);
     expect(snap.dedupedBytes).toBe(800);
+    // The whole point of the split: deduped bytes never left the phone, so
+    // counting them as throughput is what used to report ~GiB/s.
+    expect(snap.wireBytes).toBe(0);
   });
 
   it('tracks file-count counters', () => {
@@ -156,7 +152,6 @@ describe('ProgressBus', () => {
     bus.setTotals({ totalFiles: 1, totalBytes: 1 });
     bus.startFile({ localPath: 'a', name: 'a', size: 1, bytesUploaded: 0 });
     bus.updateFileBytes('a', 1);
-    bus.advanceUploaded(1);
     bus.recordDedup(1);
     expect(bus.getSnapshot().activeRun).toBeNull();
   });
