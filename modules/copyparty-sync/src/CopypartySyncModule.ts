@@ -41,6 +41,19 @@ declare class CopypartySyncModule extends NativeModule {
    *  stop entirely. */
   isBackgroundRestricted(): boolean;
 
+  /** Whether Android will actually display notifications this app posts.
+   *
+   *  Strictly stronger than a POST_NOTIFICATIONS check: the user can switch the
+   *  app's notifications off wholesale in system settings, which leaves the
+   *  runtime permission reading as granted while everything posted is dropped.
+   *  Below API 33 there is no runtime permission, so this is the only signal.
+   *
+   *  Added after the other probes, so a binary predating it leaves the property
+   *  undefined — a JS reload does not pick up a new native Function. Call it as
+   *  `CopypartySync?.areNotificationsEnabled?.() ?? true` so a stale build
+   *  degrades to "looks fine" instead of throwing. */
+  areNotificationsEnabled(): boolean;
+
   /** Data Saver: 'enabled' restricts background data on metered networks
    *  ('whitelisted' = this app exempted, 'disabled' = Data Saver off). */
   getDataSaverStatus(): 'disabled' | 'whitelisted' | 'enabled';

@@ -81,6 +81,7 @@ export default function RootLayout() {
               name="background-sync"
               options={{ title: 'Background sync' }}
             />
+            <Stack.Screen name="permissions" options={{ title: 'App permissions' }} />
             <Stack.Screen
               name="backup"
               options={{ title: 'Backup & restore', presentation: 'modal' }}

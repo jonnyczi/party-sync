@@ -9,7 +9,6 @@ export type HealthStatus = 'ok' | 'warn' | 'blocked';
 /** Which Fix action a checklist row's button dispatches (src/sync/health-fixes). */
 export type HealthFix =
   | 'battery_dialog'
-  | 'notification_settings'
   | 'app_settings'
   | 'data_saver_settings'
   | 'web_guide';
@@ -17,7 +16,6 @@ export type HealthFix =
 export type DataSaverStatus = 'disabled' | 'whitelisted' | 'enabled';
 
 export interface HealthProbeState {
-  notificationsGranted: boolean;
   batteryExempt: boolean;
   backgroundRestricted: boolean;
   dataSaver: DataSaverStatus;
@@ -26,7 +24,7 @@ export interface HealthProbeState {
 }
 
 export interface HealthItem {
-  id: 'battery' | 'background_restriction' | 'notifications' | 'data_saver' | 'standby' | 'oem';
+  id: 'battery' | 'background_restriction' | 'data_saver' | 'standby' | 'oem';
   status: HealthStatus;
   title: string;
   detail: string;
@@ -87,24 +85,6 @@ export function evaluateSyncHealth(p: HealthProbeState): HealthItem[] {
           status: 'ok',
           title: 'Background usage',
           detail: 'Background activity is allowed.',
-        },
-  );
-
-  items.push(
-    p.notificationsGranted
-      ? {
-          id: 'notifications',
-          status: 'ok',
-          title: 'Notifications',
-          detail: 'Sync progress and results will be visible.',
-        }
-      : {
-          id: 'notifications',
-          status: 'warn',
-          title: 'Notifications',
-          detail:
-            'Notifications are off — syncs still run, but progress and failures are invisible.',
-          fix: 'notification_settings',
         },
   );
 

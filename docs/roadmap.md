@@ -130,6 +130,20 @@ work makes stranded partials much rarer, so severity is reduced.
 
 ## Done (for context) 🟢
 
+- **App permissions screen** (2026-08-09, `feat/app-permissions-view`): sibling
+  of `/background-sync` at `/permissions`, reached from Settings → Privacy. One
+  row per app-wide permission (photos, photo location, notifications) with an
+  explicit required/optional level — camera-roll access is only *required* when
+  a media job actually exists — and, for the optional ones, a plain statement of
+  what leaving them off costs. Buttons ask in-app first and only fall back to
+  system settings once Android stops prompting. A second section covers per-job
+  SAF folder grants, which are not app-wide permissions and can be lost silently.
+  Two correctness fixes rode along: Android 14 "Select photos" partial access is
+  now distinguished from full access (`getMediaReadState`), and the notification
+  check is now `POST_NOTIFICATIONS` **and** a new native
+  `areNotificationsEnabled()` probe — the permission alone reads as granted while
+  the user has the app's notifications switched off wholesale. The notifications
+  row moved off the background-sync checklist, which is now five rows.
 - **Background sync reliability + setup guidance** (2026-07-04,
   `feat/background-sync-reliability`): real dataSync foreground service + wake
   lock + RN headless keep-alive around every run (swipe-away and screen-off

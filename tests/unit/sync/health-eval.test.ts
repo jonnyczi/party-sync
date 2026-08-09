@@ -7,7 +7,6 @@ import {
 } from '../../../src/sync/health-eval';
 
 const healthy: HealthProbeState = {
-  notificationsGranted: true,
   batteryExempt: true,
   backgroundRestricted: false,
   dataSaver: 'disabled',
@@ -20,12 +19,11 @@ function itemById(state: HealthProbeState) {
 }
 
 describe('evaluateSyncHealth', () => {
-  it('returns all six items, every one ok, on a healthy device', () => {
+  it('returns all five items, every one ok, on a healthy device', () => {
     const items = evaluateSyncHealth(healthy);
     expect(items.map((i) => i.id)).toEqual([
       'battery',
       'background_restriction',
-      'notifications',
       'data_saver',
       'standby',
       'oem',
@@ -46,14 +44,6 @@ describe('evaluateSyncHealth', () => {
     )!;
     expect(item.status).toBe('blocked');
     expect(item.fix).toBe('app_settings');
-  });
-
-  it('flags denied notifications as warn (sync still runs)', () => {
-    const item = itemById({ ...healthy, notificationsGranted: false }).get(
-      'notifications',
-    )!;
-    expect(item.status).toBe('warn');
-    expect(item.fix).toBe('notification_settings');
   });
 
   it('warns on active Data Saver but not when whitelisted', () => {
@@ -95,7 +85,6 @@ describe('evaluateSyncHealth', () => {
 
   it('reports multiple simultaneous problems independently', () => {
     const items = evaluateSyncHealth({
-      notificationsGranted: false,
       batteryExempt: false,
       backgroundRestricted: true,
       dataSaver: 'enabled',
@@ -103,6 +92,6 @@ describe('evaluateSyncHealth', () => {
       manufacturer: 'samsung',
     });
     expect(items.filter((i) => i.status === 'blocked')).toHaveLength(2);
-    expect(items.filter((i) => i.status === 'warn')).toHaveLength(4);
+    expect(items.filter((i) => i.status === 'warn')).toHaveLength(3);
   });
 });

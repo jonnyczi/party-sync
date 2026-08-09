@@ -19,24 +19,74 @@ import { PermissionsAndroid, Platform } from 'react-native';
  * `../sync/notify-permission.ts` does — no extra native surface.
  */
 
-/** Whether the camera roll can be enumerated and its files opened. */
-export async function hasMediaReadPermission(): Promise<boolean> {
-  // The media pipeline (native hashing module + MediaStore URIs) is Android-only.
-  if (Platform.OS !== 'android') return false;
+/**
+ * How much of the camera roll is readable.
+ *
+ * - 'full': READ_MEDIA_IMAGES and/or READ_MEDIA_VIDEO — the whole roll.
+ * - 'partial': Android 14's "Select photos", which grants only
+ *   READ_MEDIA_VISUAL_USER_SELECTED. Enumeration and reads both work, but the
+ *   roll is whatever the user picked and nothing added later joins it.
+ * - 'denied': nothing readable.
+ * - 'unsupported': non-Android — the media pipeline (native hashing module +
+ *   MediaStore URIs) is Android-only.
+ */
+export type MediaReadState = 'full' | 'partial' | 'denied' | 'unsupported';
+
+export async function getMediaReadState(): Promise<MediaReadState> {
+  if (Platform.OS !== 'android') return 'unsupported';
 
   const P = PermissionsAndroid.PERMISSIONS;
   if (typeof Platform.Version === 'number' && Platform.Version >= 33) {
-    // Android 14's "Select photos" partial access grants only
-    // READ_MEDIA_VISUAL_USER_SELECTED — the roll is then a subset, but
-    // enumeration and reads both work, so it counts as usable.
-    const checks = await Promise.all([
+    const [images, video, userSelected] = await Promise.all([
       PermissionsAndroid.check(P.READ_MEDIA_IMAGES),
       PermissionsAndroid.check(P.READ_MEDIA_VIDEO),
       PermissionsAndroid.check(P.READ_MEDIA_VISUAL_USER_SELECTED),
     ]);
-    return checks.some(Boolean);
+    // Order matters: on API 34+ the user-selected permission is granted
+    // alongside a full grant too, so it only means "partial" when both full
+    // permissions are denied. Testing it first reports every device as partial.
+    if (images || video) return 'full';
+    return userSelected ? 'partial' : 'denied';
   }
-  return PermissionsAndroid.check(P.READ_EXTERNAL_STORAGE);
+  return (await PermissionsAndroid.check(P.READ_EXTERNAL_STORAGE)) ? 'full' : 'denied';
+}
+
+/**
+ * Whether the camera roll can be enumerated and its files opened.
+ *
+ * Partial access counts: the roll is a subset, but every read works, and a job
+ * must not be blocked over it. Callers that want to *tell the user* about the
+ * subset want {@link getMediaReadState} instead.
+ */
+export async function hasMediaReadPermission(): Promise<boolean> {
+  const state = await getMediaReadState();
+  return state === 'full' || state === 'partial';
+}
+
+/**
+ * Prompt for camera-roll read access and report the state afterwards.
+ *
+ * On Android 14+ this re-opens the photo picker when access is already partial,
+ * so 'partial' is a legitimate outcome of a "grant" tap — the caller decides
+ * whether to escalate to system settings. READ_MEDIA_VISUAL_USER_SELECTED is
+ * only requested on API 34+, where it exists; asking for it on 33 would request
+ * a permission the platform cannot grant.
+ */
+export async function requestMediaReadAccess(): Promise<MediaReadState> {
+  if (Platform.OS !== 'android') return 'unsupported';
+
+  const P = PermissionsAndroid.PERMISSIONS;
+  const version = typeof Platform.Version === 'number' ? Platform.Version : 0;
+  if (version >= 33) {
+    await PermissionsAndroid.requestMultiple(
+      version >= 34
+        ? [P.READ_MEDIA_IMAGES, P.READ_MEDIA_VIDEO, P.READ_MEDIA_VISUAL_USER_SELECTED]
+        : [P.READ_MEDIA_IMAGES, P.READ_MEDIA_VIDEO],
+    );
+  } else {
+    await PermissionsAndroid.request(P.READ_EXTERNAL_STORAGE);
+  }
+  return getMediaReadState();
 }
 
 /**

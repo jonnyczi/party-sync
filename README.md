@@ -48,6 +48,12 @@ except the server you configure.
 | Foreground service, wake lock, battery-optimization exemption | Keep long uploads and scheduled background syncs alive. |
 | Network state | Honour the Wi-Fi-only and Data-Saver constraints. |
 
+The app explains this in place too: **Settings → Privacy → App permissions** shows what is
+currently granted, marks each one required or optional against the jobs you actually have,
+and spells out what leaving an optional one off costs. Folder jobs get their own section
+there, because access to a folder you picked is a per-folder grant rather than one of the
+app-wide permissions above — and it can be lost without warning if the folder moves.
+
 ### Why a location permission
 
 This one reads alarmingly on the permission list, so: it does not let the app find out
@@ -183,7 +189,7 @@ fixes each one with a tap.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/background-sync-dark.webp">
-  <img src="docs/screenshots/background-sync-light.webp" width="260" alt="Background sync checklist flagging battery optimization as blocking with an Allow exemption button, and five other checks passing">
+  <img src="docs/screenshots/background-sync-light.webp" width="260" alt="Background sync checklist flagging battery optimization as blocking with an Allow exemption button, and four other checks passing">
 </picture>
 
 ## Development

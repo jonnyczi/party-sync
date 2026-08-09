@@ -44,9 +44,6 @@ export default function BackgroundSyncScreen() {
         case 'battery_dialog':
           await CopypartySync?.requestIgnoreBatteryOptimizations();
           break;
-        case 'notification_settings':
-          await CopypartySync?.openNotificationSettings();
-          break;
         case 'app_settings':
           await CopypartySync?.openAppSettings();
           break;
@@ -154,8 +151,6 @@ function fixLabel(fix: HealthFix): string {
   switch (fix) {
     case 'battery_dialog':
       return 'Allow exemption';
-    case 'notification_settings':
-      return 'Open notification settings';
     case 'app_settings':
       return 'Open app settings';
     case 'data_saver_settings':

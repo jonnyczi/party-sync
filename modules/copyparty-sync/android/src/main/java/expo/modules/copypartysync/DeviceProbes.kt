@@ -6,6 +6,7 @@ import android.content.Context
 import android.net.ConnectivityManager
 import android.os.Build
 import android.os.PowerManager
+import androidx.core.app.NotificationManagerCompat
 
 /**
  * Read-only probes for the background-sync health checklist. Each answers one
@@ -27,6 +28,18 @@ object DeviceProbes {
     val am = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
     return am.isBackgroundRestricted
   }
+
+  /**
+   * Whether Android will actually display anything this app posts.
+   *
+   * POST_NOTIFICATIONS being granted is not the same question: the user can
+   * switch the app's notifications off wholesale in system settings (the
+   * OP_POST_NOTIFICATION appop), which leaves the runtime permission reading as
+   * granted while every notification is dropped silently. Below API 33 there is
+   * no runtime permission at all, so this is the *only* signal.
+   */
+  fun areNotificationsEnabled(context: Context): Boolean =
+    NotificationManagerCompat.from(context).areNotificationsEnabled()
 
   /**
    * Data Saver state, only meaningful on a metered connection:

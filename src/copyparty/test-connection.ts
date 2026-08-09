@@ -1,3 +1,5 @@
+import { probeSafAccess } from '../storage/saf';
+
 import { CopypartyClient } from './client';
 import { Up2kError } from './types';
 
@@ -101,7 +103,7 @@ export async function testJobConnection(
   if (opts.sourceKind === 'media') {
     localOk = await probeMediaLibrary();
   } else if (opts.sourceUri) {
-    localOk = await probeSaf(opts.sourceUri);
+    localOk = await probeSafAccess(opts.sourceUri);
   }
   return { remoteOk: true, localOk };
 }
@@ -134,18 +136,6 @@ export function mapError(e: unknown, remotePath: string): TestConnectionError {
     'Server unreachable. Check the URL and your network.',
     'unreachable',
   );
-}
-
-async function probeSaf(sourceUri: string): Promise<boolean> {
-  try {
-    // Lazy-require so this file can be imported in Node (vitest) without
-    // pulling in expo-file-system's native module.
-    const mod = await import('expo-file-system/legacy');
-    await mod.StorageAccessFramework.readDirectoryAsync(sourceUri);
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 async function probeMediaLibrary(): Promise<boolean> {

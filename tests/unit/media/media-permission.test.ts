@@ -45,8 +45,10 @@ vi.mock('react-native', () => ({
 }));
 
 import {
+  getMediaReadState,
   getOriginalBytesState,
   hasMediaReadPermission,
+  requestMediaReadAccess,
   requestOriginalBytesAccess,
   requestOriginalBytesAccessWithMediaRead,
 } from '@/src/media/media-permission';
@@ -57,6 +59,105 @@ beforeEach(() => {
   state.granted.clear();
   grantOnRequest.clear();
   asked.length = 0;
+});
+
+describe('getMediaReadState', () => {
+  it('is full when READ_MEDIA_IMAGES is granted', async () => {
+    state.granted.add(PERMISSIONS.READ_MEDIA_IMAGES);
+    expect(await getMediaReadState()).toBe('full');
+  });
+
+  it('is full when only READ_MEDIA_VIDEO is granted', async () => {
+    state.granted.add(PERMISSIONS.READ_MEDIA_VIDEO);
+    expect(await getMediaReadState()).toBe('full');
+  });
+
+  it('is partial when only the user-selected grant is held', async () => {
+    state.granted.add(PERMISSIONS.READ_MEDIA_VISUAL_USER_SELECTED);
+    expect(await getMediaReadState()).toBe('partial');
+  });
+
+  it('is full, not partial, when the user-selected grant rides along with a full one', async () => {
+    // API 34+ grants READ_MEDIA_VISUAL_USER_SELECTED alongside "Allow all" too.
+    // Checking it first would report every fully granted device as partial.
+    state.granted.add(PERMISSIONS.READ_MEDIA_IMAGES);
+    state.granted.add(PERMISSIONS.READ_MEDIA_VISUAL_USER_SELECTED);
+    expect(await getMediaReadState()).toBe('full');
+  });
+
+  it('is denied when nothing is granted', async () => {
+    expect(await getMediaReadState()).toBe('denied');
+  });
+
+  it('is unsupported off Android', async () => {
+    state.os = 'ios';
+    expect(await getMediaReadState()).toBe('unsupported');
+  });
+
+  it('reads READ_EXTERNAL_STORAGE below API 33', async () => {
+    state.version = 32;
+    expect(await getMediaReadState()).toBe('denied');
+    state.granted.add(PERMISSIONS.READ_EXTERNAL_STORAGE);
+    expect(await getMediaReadState()).toBe('full');
+  });
+});
+
+describe('hasMediaReadPermission', () => {
+  it('stays true for partial access — the roll is a subset but every read works', async () => {
+    state.granted.add(PERMISSIONS.READ_MEDIA_VISUAL_USER_SELECTED);
+    expect(await hasMediaReadPermission()).toBe(true);
+  });
+
+  it('is false when nothing is granted', async () => {
+    expect(await hasMediaReadPermission()).toBe(false);
+  });
+
+  it('is false off Android', async () => {
+    state.os = 'ios';
+    state.granted.add(PERMISSIONS.READ_MEDIA_IMAGES);
+    expect(await hasMediaReadPermission()).toBe(false);
+  });
+});
+
+describe('requestMediaReadAccess', () => {
+  it('asks for images, video and the user-selected permission on API 34+', async () => {
+    grantOnRequest.add(PERMISSIONS.READ_MEDIA_IMAGES);
+
+    expect(await requestMediaReadAccess()).toBe('full');
+    expect(asked).toEqual([
+      [
+        PERMISSIONS.READ_MEDIA_IMAGES,
+        PERMISSIONS.READ_MEDIA_VIDEO,
+        PERMISSIONS.READ_MEDIA_VISUAL_USER_SELECTED,
+      ],
+    ]);
+  });
+
+  it('omits the user-selected permission on API 33, where the platform has no such permission', async () => {
+    state.version = 33;
+
+    await requestMediaReadAccess();
+    expect(asked).toEqual([[PERMISSIONS.READ_MEDIA_IMAGES, PERMISSIONS.READ_MEDIA_VIDEO]]);
+  });
+
+  it('asks for READ_EXTERNAL_STORAGE below API 33', async () => {
+    state.version = 32;
+    grantOnRequest.add(PERMISSIONS.READ_EXTERNAL_STORAGE);
+
+    expect(await requestMediaReadAccess()).toBe('full');
+    expect(asked).toEqual([[PERMISSIONS.READ_EXTERNAL_STORAGE]]);
+  });
+
+  it('reports partial when only the user-selected grant lands', async () => {
+    grantOnRequest.add(PERMISSIONS.READ_MEDIA_VISUAL_USER_SELECTED);
+    expect(await requestMediaReadAccess()).toBe('partial');
+  });
+
+  it('reports unsupported off Android without asking for anything', async () => {
+    state.os = 'ios';
+    expect(await requestMediaReadAccess()).toBe('unsupported');
+    expect(asked).toEqual([]);
+  });
 });
 
 describe('getOriginalBytesState', () => {

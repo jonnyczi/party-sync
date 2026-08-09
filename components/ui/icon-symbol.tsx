@@ -31,6 +31,7 @@ const MAPPING = {
   'clock': 'schedule',
   'arrow.up.circle.fill': 'arrow-circle-up',
   'lock.fill': 'lock',
+  'lock.shield': 'privacy-tip',
   'chevron.left': 'chevron-left',
   'xmark': 'close',
   'arrow.up.arrow.down': 'import-export',

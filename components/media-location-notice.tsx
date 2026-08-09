@@ -1,17 +1,13 @@
 import { useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import { Alert, AppState, Pressable, StyleSheet, View } from 'react-native';
+import { AppState, Pressable, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
-import CopypartySync from '@/modules/copyparty-sync';
-import {
-  getOriginalBytesState,
-  requestOriginalBytesAccess,
-  requestOriginalBytesAccessWithMediaRead,
-} from '@/src/media/media-permission';
+import { getOriginalBytesState } from '@/src/media/media-permission';
+import { requestOriginalBytesWithEscalation } from '@/src/media/request-original-bytes';
 
 /** Camera-roll jobs vs Folder jobs — same defect, different explanation owed. */
 export type MediaLocationVariant = 'media' | 'folder';
@@ -90,61 +86,13 @@ export function MediaLocationNotice({
     return () => sub.remove();
   }, [refresh]);
 
-  const settle = useCallback(
-    (state: Awaited<ReturnType<typeof getOriginalBytesState>>) => {
-      if (state === 'needs_permission') return false;
-      setDenied(false);
-      onChange?.();
-      return true;
-    },
-    [onChange],
-  );
+  const settle = useCallback(() => {
+    setDenied(false);
+    onChange?.();
+  }, [onChange]);
 
-  const onGrant = useCallback(async () => {
-    // Stage one: the small ask — location only, no photo library.
-    if (settle(await requestOriginalBytesAccess())) return;
-
-    // Some builds won't grant it standalone. Offer the larger ask rather than
-    // dead-ending, but make the user opt into it knowingly.
-    Alert.alert(
-      'Allow photos to be read unedited',
-      'Android would not grant this on its own. It can also be granted together with ' +
-        'access to your photos — the app does not browse your photo library for a folder ' +
-        'backup, it only needs this so Android stops blanking the GPS tag.',
-      [
-        { text: 'Not now', style: 'cancel' },
-        {
-          text: 'Open settings',
-          onPress: () => {
-            CopypartySync?.openAppSettings().catch(() => {});
-          },
-        },
-        {
-          text: 'Allow both',
-          onPress: () => {
-            void requestOriginalBytesAccessWithMediaRead().then((state) => {
-              if (settle(state)) return;
-              // Two refusals and Android stops showing the dialog at all, so
-              // system settings is the only remaining route.
-              Alert.alert(
-                'Still blocked',
-                'Android is no longer showing the permission prompt. Enable it under ' +
-                  'Permissions in system settings to back up photos exactly as they are.',
-                [
-                  { text: 'Not now', style: 'cancel' },
-                  {
-                    text: 'Open settings',
-                    onPress: () => {
-                      CopypartySync?.openAppSettings().catch(() => {});
-                    },
-                  },
-                ],
-              );
-            });
-          },
-        },
-      ],
-    );
+  const onGrant = useCallback(() => {
+    void requestOriginalBytesWithEscalation(settle);
   }, [settle]);
 
   if (!denied) return null;

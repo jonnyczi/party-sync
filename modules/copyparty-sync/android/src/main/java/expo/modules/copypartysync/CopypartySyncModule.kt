@@ -112,7 +112,7 @@ class CopypartySyncModule : Module() {
       TickLiveness.alive = true
     }
 
-    // ---- Health probes (see src/sync/health.ts) ----
+    // ---- Device probes (see src/sync/health.ts, src/permissions/permissions.ts) ----
 
     Function("isIgnoringBatteryOptimizations") {
       DeviceProbes.isIgnoringBatteryOptimizations(context)
@@ -120,6 +120,10 @@ class CopypartySyncModule : Module() {
 
     Function("isBackgroundRestricted") {
       DeviceProbes.isBackgroundRestricted(context)
+    }
+
+    Function("areNotificationsEnabled") {
+      DeviceProbes.areNotificationsEnabled(context)
     }
 
     Function("getDataSaverStatus") {

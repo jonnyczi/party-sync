@@ -119,6 +119,26 @@ export default function SettingsScreen() {
       </View>
 
       <View style={styles.section}>
+        <ThemedText type="subtitle">Privacy</ThemedText>
+        <Pressable
+          onPress={() => router.push('/permissions')}
+          style={({ pressed }) => [
+            styles.navRow,
+            { borderColor: Colors[scheme].border, opacity: pressed ? 0.6 : 1 },
+          ]}
+          accessibilityLabel="App permissions">
+          <IconSymbol name="lock.shield" color={Colors[scheme].tint} size={20} />
+          <View style={{ flex: 1, gap: 2 }}>
+            <ThemedText type="defaultSemiBold">App permissions</ThemedText>
+            <ThemedText style={styles.rowSub}>
+              What {APP_NAME} can read, why, and what each one costs to leave off.
+            </ThemedText>
+          </View>
+          <IconSymbol name="chevron.right" color={Colors[scheme].icon} size={18} />
+        </Pressable>
+      </View>
+
+      <View style={styles.section}>
         <ThemedText type="subtitle">Data</ThemedText>
         <Pressable
           onPress={() => router.push('/backup')}
