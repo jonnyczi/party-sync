@@ -152,6 +152,11 @@ class CopypartySyncModule : Module() {
       DeviceProbes.areNotificationsEnabled(context)
     }
 
+    /** Screen on? Polled by the bandwidth limiter (src/sync/throttle.ts). */
+    Function("isScreenInteractive") {
+      DeviceProbes.isScreenInteractive(context)
+    }
+
     Function("getDataSaverStatus") {
       DeviceProbes.getDataSaverStatus(context)
     }

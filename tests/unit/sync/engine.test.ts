@@ -140,6 +140,40 @@ describe('engine.runJob', () => {
     expect(server.handshakes).toBe(2); // initial + re-handshake, for fresh.bin only
   });
 
+  it('routes every chunk POST through the pacer and honours its batch cap', async () => {
+    // 4 MiB → 1 MiB chunksize → 4 chunks. Unthrottled these stitch into one
+    // POST; a 1 MiB cap forces four, which is how the limiter keeps bursts
+    // short enough for other traffic to get a look in.
+    const entry = makeEntry('big.bin', 4 * MIB);
+    const server = makeFakeServer([entry]);
+    const paced: number[] = [];
+    const pacer = {
+      prime: async () => {},
+      isActive: () => true,
+      maxBatchBytes: () => MIB,
+      run: async <T,>(fn: () => Promise<T>) => {
+        paced.push(1);
+        return fn();
+      },
+    };
+
+    const run = await runJob(
+      {
+        db,
+        walker: fakeWalker([entry]),
+        client: server.client,
+        fileSource: makeFileSource([entry]),
+        pacer,
+        sleep: noSleep,
+      },
+      jobId,
+    );
+
+    expect(run.status).toBe('ok');
+    expect(server.chunkPosts).toBe(4); // capped, not one stitched 4 MiB POST
+    expect(paced).toHaveLength(4); // every one of them went through the gate
+  });
+
   it('re-uploads when file_state exists but size changed', async () => {
     const entry = makeEntry('c.bin', MIB + 1);
     await db.runAsync(

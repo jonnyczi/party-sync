@@ -1,3 +1,4 @@
+import type { BandwidthMode } from '@/src/db/settings';
 import type { JobRow, ServerRow } from '@/src/db/types';
 
 import {
@@ -18,6 +19,8 @@ export interface BuildBundleInput {
   includePasswords: boolean;
   /** Current global "result notifications" preference, carried in the bundle. */
   resultNotifications: boolean;
+  /** Current global upload-bandwidth share. */
+  bandwidthMode: BandwidthMode;
   appVersion: string;
   now?: number;
 }
@@ -79,7 +82,10 @@ export function buildBundle(input: BuildBundleInput): BackupBundleV1 {
     includesPasswords: input.includePasswords && servers.some((s) => s.password),
     servers,
     jobs,
-    settings: { resultNotifications: input.resultNotifications },
+    settings: {
+      resultNotifications: input.resultNotifications,
+      bandwidthMode: input.bandwidthMode,
+    },
   };
 }
 
@@ -221,12 +227,26 @@ export function parseBundle(text: string): BackupBundleV1 {
 
 /**
  * Parse the optional `settings` object defensively — an older or hand-edited
- * backup may omit it or carry junk. Returns undefined unless it contains a
- * well-formed boolean, so import leaves the local preference untouched.
+ * backup may omit it or carry junk. Each field is validated on its own and
+ * dropped if malformed, so import leaves that local preference untouched
+ * rather than discarding the whole object (an older bundle carries only
+ * `resultNotifications`, and must still apply it).
  */
-function parseSettings(v: unknown): { resultNotifications: boolean } | undefined {
+function parseSettings(
+  v: unknown,
+): { resultNotifications?: boolean; bandwidthMode?: BandwidthMode } | undefined {
   if (typeof v !== 'object' || v === null) return undefined;
-  const rn = (v as Record<string, unknown>).resultNotifications;
-  if (typeof rn !== 'boolean') return undefined;
-  return { resultNotifications: rn };
+  const raw = v as Record<string, unknown>;
+  const out: { resultNotifications?: boolean; bandwidthMode?: BandwidthMode } = {};
+  if (typeof raw.resultNotifications === 'boolean') {
+    out.resultNotifications = raw.resultNotifications;
+  }
+  // An unrecognised mode is dropped rather than coerced to 'full', so a bundle
+  // from a future version can't silently turn someone's limit off.
+  if (isBandwidthMode(raw.bandwidthMode)) out.bandwidthMode = raw.bandwidthMode;
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+function isBandwidthMode(v: unknown): v is BandwidthMode {
+  return v === 'full' || v === 'balanced' || v === 'gentle';
 }

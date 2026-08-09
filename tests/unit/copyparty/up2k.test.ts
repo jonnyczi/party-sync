@@ -26,6 +26,31 @@ describe('planStitchedChunks', () => {
     expect(batches[0].cdr).toBe(size); // clamped to the file's real end
   });
 
+  it('honours a smaller maxStitchBytes from the bandwidth limiter', () => {
+    // A POST is unbreakable, so the batch size sets the smallest burst the
+    // throttle can enforce (see src/sync/throttle.ts).
+    const all = hashes(8);
+    const size = 8 * MIB;
+    const batches = planStitchedChunks(all, all, MIB, size, 2 * MIB);
+
+    expect(batches).toHaveLength(4);
+    for (const b of batches) expect(b.cdr - b.car).toBeLessThanOrEqual(2 * MIB);
+    // Still covers the whole file, in order, with no gaps.
+    expect(batches[0].car).toBe(0);
+    expect(batches[batches.length - 1].cdr).toBe(size);
+  });
+
+  it('still emits a single chunk larger than the cap', () => {
+    // Sub-chunking needs X-Up2k-Subc, which we deliberately do not use, so a
+    // large-file chunksize is an irreducible burst.
+    const all = hashes(2);
+    const chunksize = 16 * MIB;
+    const batches = planStitchedChunks(all, all, chunksize, 32 * MIB, MIB);
+
+    expect(batches).toHaveLength(2);
+    expect(batches[0].cdr - batches[0].car).toBe(chunksize);
+  });
+
   it('splits when a contiguous run exceeds the chunk-count cap', () => {
     const n = MAX_STITCH_CHUNKS + 2; // 10
     const all = hashes(n);

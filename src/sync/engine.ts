@@ -17,6 +17,7 @@ import type {
 import { dateSubdir } from './path-organization';
 import { ProgressBus } from './progress';
 import * as runControl from './run-control';
+import { PacerAbortedError, type Pacer } from './throttle';
 import type { SourceWalker, WalkerEntry } from './walker/types';
 
 // v1 retry policy — hard-coded. Applied at the HTTP call level (handshake +
@@ -46,6 +47,12 @@ export interface EngineOptions {
    * set. Used by retry-failed to re-run a job scoped to one run's failed files.
    */
   filterPaths?: Set<string>;
+  /**
+   * Bandwidth limiter, shared by the whole worker pool. Supplied by the
+   * triggers (`createSettingsPacer`, throttle-device.ts) the same way
+   * `fileSource` is; absent means no limit, which is what the unit tests want.
+   */
+  pacer?: Pacer;
 }
 
 /**
@@ -71,6 +78,9 @@ export async function runJob(
   const now = opts.now ?? Date.now;
   const sleep = opts.sleep ?? defaultSleep;
   const retryingClient = withRetry(opts.client, sleep);
+  // One pacer per run, shared by every worker — the duty cycle is a property of
+  // the link, not of a single file.
+  const pacer = opts.pacer;
 
   const job = await getJob(opts.db, jobId);
   if (!job) throw new Error(`job ${jobId} not found`);
@@ -147,6 +157,11 @@ export async function runJob(
     // denominator (and the skip count) while the upload phase runs.
     await persistCounters(true);
 
+    // Load the bandwidth setting before any batch is planned — `maxBatchBytes`
+    // is synchronous, so an unprimed pacer would size the first file's batches
+    // at the unthrottled cap.
+    await pacer?.prime();
+
     progress.setPhase('uploading');
 
     const processEntry = async (entry: WalkerEntry): Promise<void> => {
@@ -177,6 +192,7 @@ export async function runJob(
           lmod,
           precomputedSize: entry.size,
           signal,
+          pacer,
           onProgress: ({ bytesUploaded: b }) => {
             progress.updateFileBytes(entry.localPath, b);
           },
@@ -203,7 +219,11 @@ export async function runJob(
         // A file torn down by cancellation isn't a failure — the run is being
         // stopped on purpose. Swallow it (the `finally` still ends the file) so
         // it isn't logged or counted as failed; the run finalizes as 'cancelled'.
-        if (e instanceof RequestCancelledError || runControl.isCancelRequested(runId)) {
+        if (
+          e instanceof RequestCancelledError ||
+          e instanceof PacerAbortedError ||
+          runControl.isCancelRequested(runId)
+        ) {
           return;
         }
         const phase = classifyErrorPhase(e);

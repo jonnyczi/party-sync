@@ -10,6 +10,7 @@ import { runJob } from '../engine';
 import { withForegroundService } from '../foreground';
 import { notifyRunResult } from '../notify-result';
 import { defaultProgressBus } from '../progress';
+import { createSettingsPacer } from '../throttle-device';
 
 import { resolveWalker } from './manual';
 
@@ -55,6 +56,7 @@ export async function retryRunFailures(
         walker,
         client,
         fileSource: nativeFileSource,
+        pacer: createSettingsPacer(db),
         progress: defaultProgressBus,
         filterPaths: new Set(failed),
       },

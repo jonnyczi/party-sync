@@ -30,6 +30,24 @@ object DeviceProbes {
   }
 
   /**
+   * Whether the screen is on, i.e. whether someone is plausibly *using* the
+   * phone right now. Drives the bandwidth limiter, which only throttles while
+   * the device is in use so overnight syncs still run at full speed.
+   *
+   * `isInteractive` is the only signal that answers this from the background.
+   * RN's AppState cannot: during a background sync this app is always
+   * 'background', which makes "screen off, nobody around" indistinguishable
+   * from "user is browsing in Chrome" — the exact case we need to throttle for.
+   *
+   * Note this deliberately says nothing about *which* app is foregrounded;
+   * that would need PACKAGE_USAGE_STATS, which is invasive and unnecessary.
+   */
+  fun isScreenInteractive(context: Context): Boolean {
+    val pm = context.getSystemService(Context.POWER_SERVICE) as PowerManager
+    return pm.isInteractive
+  }
+
+  /**
    * Whether Android will actually display anything this app posts.
    *
    * POST_NOTIFICATIONS being granted is not the same question: the user can

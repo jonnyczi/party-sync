@@ -12,6 +12,7 @@ import { runJob } from '../engine';
 import { withForegroundService } from '../foreground';
 import { notifyRunResult } from '../notify-result';
 import { defaultProgressBus } from '../progress';
+import { createSettingsPacer } from '../throttle-device';
 import { mediaWalker } from '../walker/media';
 import { safWalker } from '../walker/saf';
 import type { SourceWalker } from '../walker/types';
@@ -49,6 +50,7 @@ export async function runJobManual(
         walker,
         client,
         fileSource: nativeFileSource,
+        pacer: createSettingsPacer(db),
         progress: defaultProgressBus,
       },
       jobId,

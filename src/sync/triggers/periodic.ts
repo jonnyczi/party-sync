@@ -14,6 +14,7 @@ import { withForegroundService } from '../foreground';
 import { notifyRunResult } from '../notify-result';
 import { defaultProgressBus } from '../progress';
 import { isJobDueForPeriodic } from '../scheduler';
+import { createSettingsPacer } from '../throttle-device';
 import { mediaWalker } from '../walker/media';
 import { safWalker } from '../walker/saf';
 import type { SourceWalker } from '../walker/types';
@@ -109,6 +110,7 @@ async function runPeriodicJob(db: SqliteDb, job: JobRow): Promise<void> {
         walker,
         client,
         fileSource: nativeFileSource,
+        pacer: createSettingsPacer(db),
         progress: defaultProgressBus,
       },
       job.id,

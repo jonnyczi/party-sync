@@ -7,7 +7,7 @@ import * as Sharing from 'expo-sharing';
 import type { SqliteDb } from '@/src/db/adapter';
 import { listJobs } from '@/src/db/jobs';
 import { listServers } from '@/src/db/servers';
-import { getResultNotificationsEnabled } from '@/src/db/settings';
+import { getBandwidthMode, getResultNotificationsEnabled } from '@/src/db/settings';
 import { getServerPassword, setServerPassword } from '@/src/storage/secrets';
 
 import type { RandomBytes } from './crypto';
@@ -47,6 +47,7 @@ export async function collectBundle(
     passwords,
     includePasswords,
     resultNotifications: await getResultNotificationsEnabled(db),
+    bandwidthMode: await getBandwidthMode(db),
     appVersion: appVersion(),
   });
 }

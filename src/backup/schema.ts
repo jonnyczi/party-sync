@@ -1,3 +1,4 @@
+import type { BandwidthMode } from '@/src/db/settings';
 import type { PathOrganization, SourceKind } from '@/src/db/types';
 
 // Versioned, portable representation of the app's configuration. Only the
@@ -57,8 +58,12 @@ export interface BackupBundleV1 {
   includesPasswords: boolean;
   servers: BackupServer[];
   jobs: BackupJob[];
-  /** App-wide preferences. Optional for backward compat with older backups. */
-  settings?: { resultNotifications: boolean };
+  /**
+   * App-wide preferences. Optional for backward compat with older backups, and
+   * each field is independently optional so a bundle written by a version that
+   * predates one of them still applies the rest.
+   */
+  settings?: { resultNotifications?: boolean; bandwidthMode?: BandwidthMode };
 }
 
 const SOURCE_KINDS: readonly SourceKind[] = ['saf', 'media'];

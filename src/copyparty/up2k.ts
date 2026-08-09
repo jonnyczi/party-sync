@@ -1,3 +1,5 @@
+import type { Pacer } from '../sync/throttle';
+
 import { up2kChunksize } from './chunksize';
 import type { CopypartyClient } from './client';
 import type { FileSource } from './hash';
@@ -45,6 +47,11 @@ export interface UploadOptions {
    * so a cancel (or per-request timeout) tears the transfer down mid-flight.
    */
   signal?: AbortSignal;
+  /**
+   * Optional bandwidth limiter. Gates each chunk POST and caps the batch size;
+   * absent (or set to Full speed) it costs nothing. See src/sync/throttle.ts.
+   */
+  pacer?: Pacer;
 }
 
 export interface UploadResult {
@@ -78,6 +85,10 @@ export interface ChunkBatch {
 /**
  * Group the server's missing-chunk hashes into stitched POST batches.
  *
+ * `maxStitchBytes` defaults to {@link MAX_STITCH_BYTES}; the bandwidth limiter
+ * passes something smaller, because a POST is unbreakable and therefore sets
+ * the smallest burst it can enforce (see src/sync/throttle.ts).
+ *
  * Each unique missing hash is mapped to its first ordinal in `allHashes`
  * (copyparty returns a duplicate chunk's hash once and clones it server-side,
  * so we upload each unique hash a single time). Ordinals are then sorted and
@@ -93,6 +104,7 @@ export function planStitchedChunks(
   allHashes: string[],
   chunksize: number,
   size: number,
+  maxStitchBytes: number = MAX_STITCH_BYTES,
 ): ChunkBatch[] {
   const ordinals: number[] = [];
   const seen = new Set<number>();
@@ -124,7 +136,7 @@ export function planStitchedChunks(
       const count = nextEnd - startOrd + 1;
       const car = startOrd * chunksize;
       const cdr = Math.min((nextEnd + 1) * chunksize, size);
-      if (count > MAX_STITCH_CHUNKS || cdr - car > MAX_STITCH_BYTES) break;
+      if (count > MAX_STITCH_CHUNKS || cdr - car > maxStitchBytes) break;
       j++;
       endOrd = nextEnd;
     }
@@ -184,10 +196,19 @@ export async function uploadFile(opts: UploadOptions): Promise<UploadResult> {
       );
     }
 
-    const batches = planStitchedChunks(response.hash, hashes, chunksize, size);
+    const batches = planStitchedChunks(
+      response.hash,
+      hashes,
+      chunksize,
+      size,
+      opts.pacer?.maxBatchBytes(),
+    );
     for (const batch of batches) {
+      // Read outside the gate so file IO overlaps with another file's POST.
       const body = await fileSource.readRange(localUri, batch.car, batch.cdr);
-      await client.uploadChunk(folder, { hash: batch.hashes.join(','), wark }, body, signal);
+      const post = () =>
+        client.uploadChunk(folder, { hash: batch.hashes.join(','), wark }, body, signal);
+      await (opts.pacer ? opts.pacer.run(post, signal) : post());
       bytesUploaded += batch.cdr - batch.car;
       onProgress?.({ bytesUploaded, totalBytes: size });
     }

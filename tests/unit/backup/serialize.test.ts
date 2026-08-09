@@ -54,6 +54,7 @@ function input(over: Partial<BuildBundleInput> = {}): BuildBundleInput {
     passwords: new Map([[1, 'hunter2']]),
     includePasswords: false,
     resultNotifications: true,
+    bandwidthMode: 'full',
     appVersion: '1.0.0',
     now: 12345,
     ...over,
@@ -107,10 +108,11 @@ describe('buildBundle', () => {
     expect(b.jobs[0].notify_on_failure).toBe(true);
   });
 
-  it('carries the global result-notifications setting', () => {
-    expect(buildBundle(input({ resultNotifications: false })).settings).toEqual({
-      resultNotifications: false,
-    });
+  it('carries the global settings', () => {
+    expect(
+      buildBundle(input({ resultNotifications: false, bandwidthMode: 'gentle' }))
+        .settings,
+    ).toEqual({ resultNotifications: false, bandwidthMode: 'gentle' });
   });
 });
 

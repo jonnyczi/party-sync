@@ -10,8 +10,11 @@ import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { APP_NAME } from '@/src/app-name';
 import {
+  getBandwidthMode,
   getResultNotificationsEnabled,
+  setBandwidthMode,
   setResultNotificationsEnabled,
+  type BandwidthMode,
 } from '@/src/db/settings';
 import CopypartySync from '@/modules/copyparty-sync';
 import { requestNotificationPermission } from '@/src/sync/notify-permission';
@@ -21,17 +24,40 @@ import { requestNotificationPermission } from '@/src/sync/notify-permission';
  * the rarely-touched knobs: the sync-result notifications kill-switch and
  * the Backup & restore entry point.
  */
+/** Ordered for the picker: least restrictive first. */
+const BANDWIDTH_OPTIONS: { mode: BandwidthMode; label: string; detail: string }[] = [
+  { mode: 'full', label: 'Full speed', detail: 'Use as much of the link as it can' },
+  { mode: 'balanced', label: 'Balanced', detail: 'Leave about half the link free' },
+  { mode: 'gentle', label: 'Gentle', detail: 'Leave about three quarters free' },
+];
+
 export default function SettingsScreen() {
   const db = useSQLiteContext();
   const router = useRouter();
   const scheme = useColorScheme() ?? 'light';
   const [notifyEnabled, setNotifyEnabled] = useState(true);
+  const [bandwidth, setBandwidth] = useState<BandwidthMode>('full');
 
   useEffect(() => {
     getResultNotificationsEnabled(db)
       .then(setNotifyEnabled)
       .catch((e) => console.warn('settings load failed', e));
+    getBandwidthMode(db)
+      .then(setBandwidth)
+      .catch((e) => console.warn('bandwidth setting load failed', e));
   }, [db]);
+
+  // Optimistic: the picker is the source of truth for the UI, and a failed
+  // write only costs the preference, never a sync.
+  const onPickBandwidth = useCallback(
+    (mode: BandwidthMode) => {
+      setBandwidth(mode);
+      setBandwidthMode(db, mode).catch((e) =>
+        console.warn('bandwidth setting save failed', e),
+      );
+    },
+    [db],
+  );
 
   // Master kill-switch for sync result notifications. Enabling requests
   // POST_NOTIFICATIONS (Android 13+); if denied, revert to off so the toggle
@@ -92,6 +118,48 @@ export default function SettingsScreen() {
           </View>
           <Switch value={notifyEnabled} onValueChange={onToggleNotify} />
         </View>
+      </View>
+
+      <View style={styles.section}>
+        <ThemedText type="subtitle">Bandwidth</ThemedText>
+        <View style={styles.pickerList}>
+          {BANDWIDTH_OPTIONS.map(({ mode, label, detail }) => {
+            const selected = bandwidth === mode;
+            return (
+              <Pressable
+                key={mode}
+                onPress={() => onPickBandwidth(mode)}
+                accessibilityRole="radio"
+                accessibilityState={{ selected }}
+                accessibilityLabel={`Bandwidth: ${label}`}
+                style={({ pressed }) => [
+                  styles.pickerRow,
+                  selected
+                    ? { borderColor: Colors[scheme].tint, borderWidth: 2 }
+                    : { borderColor: Colors[scheme].icon },
+                  { opacity: pressed ? 0.7 : 1 },
+                ]}>
+                <View style={{ flex: 1, gap: 2 }}>
+                  <ThemedText type="defaultSemiBold">{label}</ThemedText>
+                  <ThemedText style={styles.rowSub}>{detail}</ThemedText>
+                </View>
+                {selected ? (
+                  <IconSymbol
+                    name="checkmark.circle.fill"
+                    color={Colors[scheme].tint}
+                    size={22}
+                  />
+                ) : null}
+              </Pressable>
+            );
+          })}
+        </View>
+        <ThemedText style={styles.rowSub}>
+          Uploading flat out makes browsing and video stutter. These leave room for
+          everything else — but only while the screen is on, so overnight syncs still
+          run at full speed. A sync you start by hand is limited too; pick Full speed
+          when you want it to finish now.
+        </ThemedText>
       </View>
 
       <View style={styles.section}>
@@ -180,4 +248,13 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
   },
   rowSub: { opacity: 0.7, fontSize: 13 },
+  pickerList: { gap: 8 },
+  pickerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    padding: 12,
+    borderRadius: 10,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
 });

@@ -1,7 +1,7 @@
 import type { SqliteDb } from '@/src/db/adapter';
 import { createJob, listJobs } from '@/src/db/jobs';
 import { createServer, listServers } from '@/src/db/servers';
-import { setResultNotificationsEnabled } from '@/src/db/settings';
+import { setBandwidthMode, setResultNotificationsEnabled } from '@/src/db/settings';
 import { MEDIA_SOURCE_ALL } from '@/src/sync/walker/media';
 
 import type { BackupBundleV1 } from './schema';
@@ -122,10 +122,15 @@ export async function importBundle(
     summary.jobsAdded++;
   }
 
-  // Apply the global notification preference if the bundle carried one. Direct
-  // call (not via deps) is fine: src/db/settings has no native dependency.
-  if (bundle.settings) {
+  // Apply whichever global preferences the bundle carried. Direct calls (not
+  // via deps) are fine: src/db/settings has no native dependency. Each field is
+  // applied independently so an older bundle that predates one of them leaves
+  // that preference alone instead of resetting it.
+  if (bundle.settings?.resultNotifications !== undefined) {
     await setResultNotificationsEnabled(db, bundle.settings.resultNotifications);
+  }
+  if (bundle.settings?.bandwidthMode !== undefined) {
+    await setBandwidthMode(db, bundle.settings.bandwidthMode);
   }
 
   return summary;

@@ -89,6 +89,7 @@ function bundle(): BackupBundleV1 {
     passwords: new Map([[10, 'hunter2']]),
     includePasswords: true,
     resultNotifications: false,
+    bandwidthMode: 'full' as const,
     appVersion: '1.0.0',
   });
 }

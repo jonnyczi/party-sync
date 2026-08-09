@@ -65,6 +65,17 @@ declare class CopypartySyncModule extends NativeModule {
    *  degrades to "looks fine" instead of throwing. */
   areNotificationsEnabled(): boolean;
 
+  /** Whether the screen is on — i.e. whether the phone is plausibly in use.
+   *
+   *  Polled by the bandwidth limiter, which only throttles while the device is
+   *  being used. AppState can't answer this: a background sync always reports
+   *  'background', so "screen off" and "user is in Chrome" look identical.
+   *
+   *  Added after the original probes, so call it as
+   *  `CopypartySync?.isScreenInteractive?.()` — a binary predating it leaves the
+   *  property undefined and a JS-only reload will not pick it up. */
+  isScreenInteractive(): boolean;
+
   /** Data Saver: 'enabled' restricts background data on metered networks
    *  ('whitelisted' = this app exempted, 'disabled' = Data Saver off). */
   getDataSaverStatus(): 'disabled' | 'whitelisted' | 'enabled';
