@@ -18,5 +18,7 @@ android {
 }
 
 dependencies {
-  implementation 'androidx.documentfile:documentfile:1.0.1'
+  // androidx.documentfile was dropped along with DocumentFile-based walkTree:
+  // its per-getter ContentResolver.query behaviour was the SAF scan bottleneck.
+  // SafTreeWalker talks to DocumentsContract (framework) directly.
 }

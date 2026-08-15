@@ -1,6 +1,7 @@
 import { useRouter } from 'expo-router';
 import { Pressable, StyleSheet, View } from 'react-native';
 
+import { phaseLabel } from '@/components/run-progress';
 import { ThemedText } from '@/components/themed-text';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors } from '@/constants/theme';
@@ -35,13 +36,11 @@ export function SyncBanner() {
   const inFlight = run.activeFiles.length;
 
   const label =
-    run.phase === 'scanning'
-      ? 'Scanning…'
-      : run.phase === 'finalizing'
-        ? 'Finalizing…'
-        : inFlight > 0
-          ? `${inFlight} file${inFlight === 1 ? '' : 's'} · ${pct}%`
-          : 'Syncing…';
+    run.phase === 'scanning' || run.phase === 'finalizing'
+      ? phaseLabel(run)
+      : inFlight > 0
+        ? `${inFlight} file${inFlight === 1 ? '' : 's'} · ${pct}%`
+        : 'Syncing…';
 
   return (
     <Pressable

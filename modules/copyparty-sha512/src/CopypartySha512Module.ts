@@ -18,13 +18,38 @@ declare class CopypartySha512Module extends NativeModule<CopypartySha512ModuleEv
   size(uri: string): Promise<number>;
 
   /**
-   * Walk a SAF tree URI and return one entry per FILE under it. Directories
-   * are recursed into and not emitted. `relativePath` is slash-joined under
-   * the tree root (never starts with `/`). `mtimeMs` is the provider's last-
-   * modified value (0 / -1 if not supplied). Android-only; iOS parity is
-   * deferred with the rest of iOS support.
+   * Sizes for a whole page of URIs in one round trip. Prefer this to looping
+   * over {@link size}: for plain MediaStore item URIs it collapses to one
+   * MediaStore query per collection, so a 10k-asset camera roll costs a handful
+   * of queries instead of 10k of them plus 10k bridge hops.
+   *
+   * Returns one entry per input URI, in order. An entry is
+   * {@link SIZE_UNAVAILABLE} when that asset vanished between enumeration and
+   * stat, or the provider had no size — a per-item failure never fails the
+   * batch, so the caller drops only that file.
    */
-  walkTree(treeUri: string): Promise<SafWalkEntry[]>;
+  sizes(uris: string[]): Promise<number[]>;
+
+  /**
+   * Walk a SAF tree URI, streaming files to the `onWalkBatch` event.
+   *
+   * Directories are recursed into and not emitted. Entries arrive as
+   * {@link SafWalkBatchEvent} batches *while the walk is still running*, which
+   * is what lets the engine's scan counters advance live and its cancel land
+   * mid-walk; the promise itself resolves with the file count (or
+   * {@link WALK_CANCELLED}), not the entries.
+   *
+   * `walkId` must be unique per call and is echoed in every event.
+   *
+   * Android-only; iOS parity is deferred with the rest of iOS support.
+   */
+  walkTree(treeUri: string, walkId: string): Promise<number>;
+
+  /**
+   * Stop the in-flight {@link walkTree} with this id. Unknown ids are a no-op,
+   * so calling it unconditionally on teardown is safe.
+   */
+  cancelWalk(walkId: string): void;
 
   /**
    * Map a source URI to the one that yields the file's *original* bytes.
@@ -41,13 +66,14 @@ declare class CopypartySha512Module extends NativeModule<CopypartySha512ModuleEv
    * upload chunks that don't match the hashes we handshaked.
    */
   resolveReadUri(uri: string): Promise<string>;
-}
 
-export interface SafWalkEntry {
-  uri: string;
-  relativePath: string;
-  size: number;
-  mtimeMs: number;
+  /**
+   * {@link resolveReadUri} for a whole page in one round trip. Returns one entry
+   * per input URI, in order. There is no ContentResolver query on this path —
+   * the per-asset cost was the bridge hop plus a permission check whose answer
+   * cannot vary across a page, so the batch hoists it out of the loop.
+   */
+  resolveReadUris(uris: string[]): Promise<string[]>;
 }
 
 export default requireNativeModule<CopypartySha512Module>('CopypartySha512');

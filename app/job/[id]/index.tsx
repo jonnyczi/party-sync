@@ -200,7 +200,7 @@ export default function JobOverviewScreen() {
                 size={18}
               />
               <ThemedText type="defaultSemiBold" style={{ flex: 1 }}>
-                {phaseLabel(activeRunHere.phase)}
+                {phaseLabel(activeRunHere)}
               </ThemedText>
             </View>
             <RunProgress run={activeRunHere} maxFiles={5} />

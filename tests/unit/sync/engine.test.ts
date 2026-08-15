@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { CopypartyClient } from '@/src/copyparty/client';
 import type { FileSource } from '@/src/copyparty/hash';
+import { upsertFileState } from '@/src/db/file_state';
 import { createJob } from '@/src/db/jobs';
 import { listRunErrors } from '@/src/db/runs';
 import { runMigrations } from '@/src/db/schema';
@@ -573,6 +574,161 @@ describe('engine.runJob', () => {
     expect(run.files_failed).toBe(0);
     // …and it was not recorded as a per-file error.
     expect(await listRunErrors(db, run.id)).toHaveLength(0);
+  });
+
+  it('publishes scan counters while the walk is still running', async () => {
+    // Regression guard for the "Scanning… 0/0 for minutes" hang: the scan used
+    // to bump counters exactly once, after the walker was fully drained.
+    const entries = Array.from({ length: 1200 }, (_, i) => makeEntry(`f${i}.bin`, 1));
+    // Every file already synced, so the scan is the entire run — the case the
+    // user actually hits on a repeat sync.
+    for (const e of entries) {
+      await upsertFileState(db, {
+        job_id: jobId,
+        local_path: e.localPath,
+        size: e.size,
+        mtime_ms: e.mtimeMs,
+        uploaded_at: 1,
+      });
+    }
+    const server = makeFakeServer(entries);
+    const progress = new ProgressBus();
+
+    const observed: number[] = [];
+    const unsub = progress.subscribe(() => {
+      const scanned = progress.getSnapshot().activeRun?.counters.scanned;
+      if (scanned != null) observed.push(scanned);
+    });
+
+    const run = await runJob(
+      {
+        db,
+        walker: fakeWalker(entries),
+        client: server.client,
+        fileSource: makeFileSource(entries),
+        progress,
+        sleep: noSleep,
+      },
+      jobId,
+    );
+    unsub();
+
+    expect(run.files_scanned).toBe(1200);
+    expect(run.files_skipped).toBe(1200);
+    expect(run.files_uploaded).toBe(0);
+
+    const midScan = observed.filter((n) => n > 0 && n < 1200);
+    expect(midScan.length).toBeGreaterThan(0);
+    // …but throttled: nowhere near one publish per file.
+    expect(observed.length).toBeLessThan(200);
+    // The final published value is exact, not a stale partial batch.
+    expect(observed.at(-1)).toBe(1200);
+  });
+
+  it('stops the walk partway when cancel lands during the scan', async () => {
+    const entries = Array.from({ length: 500 }, (_, i) => makeEntry(`f${i}.bin`, 1));
+    const server = makeFakeServer(entries);
+    const progress = new ProgressBus();
+
+    let pulled = 0;
+    let teardownRan = false;
+    const cancellingWalker: SourceWalker = {
+      async *walk() {
+        try {
+          for (const e of entries) {
+            pulled++;
+            if (pulled === 50) {
+              const runId = progress.getSnapshot().activeRun?.runId;
+              if (runId != null) requestCancel(runId);
+            }
+            yield e;
+          }
+        } finally {
+          // The real SAF walker calls cancelWalk() here so the native walk
+          // stops instead of churning through the rest of the tree.
+          teardownRan = true;
+        }
+      },
+    };
+
+    const run = await runJob(
+      {
+        db,
+        walker: cancellingWalker,
+        client: server.client,
+        fileSource: makeFileSource(entries),
+        progress,
+        sleep: noSleep,
+      },
+      jobId,
+    );
+
+    expect(run.status).toBe('cancelled');
+    expect(teardownRan).toBe(true);
+    // The engine breaks on the entry after the cancel, so the walker is never
+    // drained — the whole point of streaming the walk.
+    expect(pulled).toBeLessThan(entries.length);
+    expect(run.files_scanned).toBeLessThan(entries.length);
+  });
+
+  it('skips a file whose provider reports size and mtime as 0', async () => {
+    // A DocumentsProvider that omits SIZE/LAST_MODIFIED yields 0 for both, and
+    // the native walker preserves that rather than normalising to -1. If either
+    // side ever drifts, every such file re-uploads on every run.
+    const entry = makeEntry('no-metadata.bin', 0);
+    entry.mtimeMs = 0;
+    await upsertFileState(db, {
+      job_id: jobId,
+      local_path: entry.localPath,
+      size: 0,
+      mtime_ms: 0,
+      uploaded_at: 1,
+    });
+    const server = makeFakeServer([entry]);
+
+    const run = await runJob(
+      {
+        db,
+        walker: fakeWalker([entry]),
+        client: server.client,
+        fileSource: makeFileSource([entry]),
+        sleep: noSleep,
+      },
+      jobId,
+    );
+
+    expect(run.files_skipped).toBe(1);
+    expect(run.files_uploaded).toBe(0);
+  });
+
+  it('does not skip a file whose prior upload never finished', async () => {
+    // `listSyncedFileStateForJob` filters `uploaded_at IS NOT NULL` in SQL now
+    // rather than the engine rejecting the row after loading it.
+    const entry = makeEntry('half-sent.bin', 1000);
+    await upsertFileState(db, {
+      job_id: jobId,
+      local_path: entry.localPath,
+      size: entry.size,
+      mtime_ms: entry.mtimeMs,
+      wark: 'stale-wark',
+      last_hashed_at: 1,
+      uploaded_at: null,
+    });
+    const server = makeFakeServer([entry]);
+
+    const run = await runJob(
+      {
+        db,
+        walker: fakeWalker([entry]),
+        client: server.client,
+        fileSource: makeFileSource([entry]),
+        sleep: noSleep,
+      },
+      jobId,
+    );
+
+    expect(run.files_skipped).toBe(0);
+    expect(run.files_uploaded).toBe(1);
   });
 });
 

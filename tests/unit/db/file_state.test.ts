@@ -4,6 +4,7 @@ import {
   deleteFileState,
   getFileState,
   listFileStateForJob,
+  listSyncedFileStateForJob,
   upsertFileState,
 } from '@/src/db/file_state';
 import { createJob } from '@/src/db/jobs';
@@ -14,11 +15,12 @@ import { createTestDb } from './adapter';
 
 let db: ReturnType<typeof createTestDb>;
 let jobId: number;
+let serverId: number;
 
 beforeEach(async () => {
   db = createTestDb();
   await runMigrations(db);
-  const serverId = await createServer(db, { name: 's', base_url: 'https://s' });
+  serverId = await createServer(db, { name: 's', base_url: 'https://s' });
   jobId = await createJob(db, {
     server_id: serverId,
     name: 'j',
@@ -100,5 +102,64 @@ describe('file_state DAO', () => {
     await db.runAsync('DELETE FROM jobs WHERE id = ?', [jobId]);
     const rows = await listFileStateForJob(db, jobId);
     expect(rows).toHaveLength(0);
+  });
+
+  describe('listSyncedFileStateForJob', () => {
+    it('returns only uploaded rows, with only the skip-decision columns', async () => {
+      await upsertFileState(db, {
+        job_id: jobId,
+        local_path: 'sent.bin',
+        size: 10,
+        mtime_ms: 20,
+        wark: 'w',
+        last_hashed_at: 5,
+        uploaded_at: 6,
+      });
+      // Hashed by a prior run but never fully sent — still needs work, so it
+      // must not appear as a skip candidate.
+      await upsertFileState(db, {
+        job_id: jobId,
+        local_path: 'half-sent.bin',
+        size: 30,
+        mtime_ms: 40,
+        wark: 'w2',
+        last_hashed_at: 5,
+        uploaded_at: null,
+      });
+
+      const rows = await listSyncedFileStateForJob(db, jobId);
+
+      expect(rows).toEqual([{ local_path: 'sent.bin', size: 10, mtime_ms: 20 }]);
+      // `wark` is 44 chars a row and is read nowhere; a 10k-file job used to
+      // carry it across the bridge on every single run.
+      expect(rows[0]).not.toHaveProperty('wark');
+    });
+
+    it('is scoped to the job', async () => {
+      const otherJobId = await createJob(db, {
+        server_id: serverId,
+        name: 'other',
+        source_kind: 'saf',
+        source_uri: 'content://other',
+        remote_path: '/other',
+      });
+      await upsertFileState(db, {
+        job_id: jobId,
+        local_path: 'mine.bin',
+        size: 1,
+        mtime_ms: 1,
+        uploaded_at: 1,
+      });
+      await upsertFileState(db, {
+        job_id: otherJobId,
+        local_path: 'theirs.bin',
+        size: 1,
+        mtime_ms: 1,
+        uploaded_at: 1,
+      });
+
+      const rows = await listSyncedFileStateForJob(db, jobId);
+      expect(rows.map((r) => r.local_path)).toEqual(['mine.bin']);
+    });
   });
 });

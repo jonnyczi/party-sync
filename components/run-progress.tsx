@@ -104,11 +104,18 @@ export function RunProgress({
   );
 }
 
-/** "Scanning…" / "Uploading" / "Finalizing…" */
-export function phaseLabel(phase: ActiveRunSnapshot['phase']): string {
-  if (phase === 'scanning') return 'Scanning…';
-  if (phase === 'finalizing') return 'Finalizing…';
-  return 'Uploading';
+/**
+ * "Scanning… 4,312 files" / "Uploading" / "Finalizing…"
+ *
+ * The scan count is live: enumerating a large folder takes long enough that a
+ * bare "Scanning…" beside a 0/0 counter read as a hang.
+ */
+export function phaseLabel(run: ActiveRunSnapshot): string {
+  if (run.phase === 'finalizing') return 'Finalizing…';
+  if (run.phase !== 'scanning') return 'Uploading';
+  return run.counters.scanned > 0
+    ? `Scanning… ${run.counters.scanned.toLocaleString()} files`
+    : 'Scanning…';
 }
 
 const styles = StyleSheet.create({

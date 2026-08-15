@@ -32,6 +32,36 @@ export async function listFileStateForJob(
   );
 }
 
+/** Just the columns the engine's `isAlreadySynced` compares. */
+export interface FileStateSyncKey {
+  local_path: string;
+  size: number;
+  mtime_ms: number;
+}
+
+/**
+ * The (size, mtime) skip index for one job's scan pass.
+ *
+ * A run loads this whole set up front, so on a 10k-file job `SELECT *` was
+ * marshalling `wark` (44 chars/row) and `last_hashed_at` across the bridge for
+ * nothing — neither is read anywhere.
+ *
+ * Filtering `uploaded_at IS NOT NULL` here is semantics-preserving: a
+ * half-finished row used to be loaded and then rejected by the `uploaded_at`
+ * check in `isAlreadySynced`, and is now simply absent, which the caller's Map
+ * lookup treats identically.
+ */
+export async function listSyncedFileStateForJob(
+  db: SqliteDb,
+  jobId: number,
+): Promise<FileStateSyncKey[]> {
+  return db.getAllAsync<FileStateSyncKey>(
+    `SELECT local_path, size, mtime_ms FROM file_state
+      WHERE job_id = ? AND uploaded_at IS NOT NULL`,
+    [jobId],
+  );
+}
+
 export async function upsertFileState(
   db: SqliteDb,
   row: FileStateUpsert,

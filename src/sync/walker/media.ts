@@ -38,15 +38,23 @@ export interface MediaLibraryLike {
   getAlbumsAsync(opts?: { includeSmartAlbums?: boolean }): Promise<MediaAlbum[]>;
 }
 export interface FileSizer {
-  size(uri: string): Promise<number>;
+  /**
+   * Sizes for a whole page, in input order. A negative entry means "no size
+   * available" — the caller drops that asset, which is what the old throwing
+   * per-asset `size()` amounted to. Batched because a per-asset call cost a
+   * bridge hop *and* a ContentResolver query, so a 10k library spent thousands
+   * of serialized round trips before the first byte uploaded.
+   */
+  sizes(uris: string[]): Promise<number[]>;
 }
 /**
- * Maps a MediaStore URI to the one that yields the file's original bytes.
+ * Maps MediaStore URIs to the ones that yield the files' original bytes.
  * Resolved once per asset so a file's hash pass and its chunk reads can never
  * disagree — see {@link WalkerEntry.uri}.
  */
 export interface ReadUriResolver {
-  resolveReadUri(uri: string): Promise<string>;
+  /** Resolved URIs for a whole page, in input order. */
+  resolveReadUris(uris: string[]): Promise<string[]>;
 }
 
 const PAGE_SIZE = 200;
@@ -70,10 +78,11 @@ const PAGE_SIZE = 200;
  * (`content://media/external/{images,video}/media/<id>`) opens with just
  * `READ_MEDIA_IMAGES`/`READ_MEDIA_VIDEO`, which is all the manifest asks.
  *
- * Why we call `size()` per asset: MediaLibrary's `Asset` type has no `size`
- * field and neither does `getAssetInfoAsync`. The native module's `size()`
- * is a cheap `OpenableColumns.SIZE` query against the content URI; hashing
- * dwarfs the per-asset bridge cost.
+ * Why we stat separately at all: MediaLibrary's `Asset` type has no `size`
+ * field and neither does `getAssetInfoAsync`. That stat is batched per page
+ * rather than per asset — the per-asset form cost a bridge hop plus a
+ * ContentResolver query each, which on a 10k-asset library was minutes of
+ * serialized round trips before the first byte uploaded.
  *
  * iOS: unsupported in Phase 4 — the hashing native module is Android-only
  * and iOS asset URIs are `ph://…` which the module doesn't read. The
@@ -112,8 +121,8 @@ async function* walkWithLazyDeps(sourceUri: string): AsyncIterable<WalkerEntry> 
   yield* walkMedia(
     sourceUri,
     MediaLibrary as unknown as MediaLibraryLike,
-    { size: (uri) => CopypartySha512.size(uri) },
-    { resolveReadUri: (uri) => CopypartySha512.resolveReadUri(uri) },
+    { sizes: (uris) => CopypartySha512.sizes(uris) },
+    { resolveReadUris: (uris) => CopypartySha512.resolveReadUris(uris) },
   );
 }
 
@@ -154,33 +163,37 @@ async function* walkMedia(
       album,
       mediaType: ['photo', 'video'],
     });
+    const contentUris: string[] = [];
+    const pageAssets: MediaAsset[] = [];
     for (const asset of page.assets) {
       const contentUri = mediaStoreUri(asset.id, asset.mediaType);
       if (!contentUri) continue;
-      let size: number;
-      try {
-        size = await sizer.size(contentUri);
-      } catch {
-        // Asset disappeared between the MediaStore query and the size()
-        // follow-up — treat as if it hadn't been enumerated. The engine
-        // will see it again (or not) on the next run.
-        continue;
-      }
-      // Read through the unredacted-original URI where we're allowed to, but
-      // keep `localPath` the bare content URI so file_state keys don't churn.
-      let readUri = contentUri;
-      try {
-        readUri = await resolver.resolveReadUri(contentUri);
-      } catch {
-        // Resolution is an optimisation for byte fidelity, never a gate —
-        // fall back to the plain URI rather than dropping the asset.
-      }
+      contentUris.push(contentUri);
+      pageAssets.push(asset);
+    }
+
+    // Two round trips per page instead of two per asset.
+    const [sizes, readUris] = await Promise.all([
+      sizer.sizes(contentUris),
+      // Resolution is an optimisation for byte fidelity, never a gate — fall
+      // back to the plain URIs rather than dropping a whole page.
+      resolver.resolveReadUris(contentUris).catch(() => contentUris),
+    ]);
+
+    for (let i = 0; i < contentUris.length; i++) {
+      const size = sizes[i];
+      // Asset disappeared between the MediaStore query and the stat, or the
+      // provider had no size — treat as if it hadn't been enumerated. The
+      // engine will see it again (or not) on the next run.
+      if (size === undefined || size < 0) continue;
       yield {
-        localPath: contentUri,
-        uri: readUri,
-        relativePath: asset.filename,
+        // Read through the unredacted-original URI where we're allowed to, but
+        // keep `localPath` the bare content URI so file_state keys don't churn.
+        localPath: contentUris[i],
+        uri: readUris[i] ?? contentUris[i],
+        relativePath: pageAssets[i].filename,
         size,
-        mtimeMs: asset.modificationTime,
+        mtimeMs: pageAssets[i].modificationTime,
       };
     }
     if (!page.hasNextPage) break;

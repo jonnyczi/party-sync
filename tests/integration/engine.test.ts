@@ -3,6 +3,7 @@ import { join } from 'node:path';
 
 import { beforeAll, describe, expect, it } from 'vitest';
 
+import { SIZE_UNAVAILABLE } from '../../modules/copyparty-sha512/src/CopypartySha512.types';
 import { CopypartyClient } from '../../src/copyparty/client';
 import type { FileSource } from '../../src/copyparty/hash';
 import { nodeFileSource } from '../../src/copyparty/hash.node';
@@ -255,16 +256,19 @@ describe('engine end-to-end against copyparty', () => {
         getAlbumsAsync: async () => [],
       };
       const sizer = {
-        size: async (uri: string) => {
-          const p = byUri.get(uri);
-          if (!p) throw new Error(`unknown uri: ${uri}`);
-          return (await stat(p)).size;
-        },
+        sizes: async (uris: string[]) =>
+          Promise.all(
+            uris.map(async (uri) => {
+              const p = byUri.get(uri);
+              if (!p) return SIZE_UNAVAILABLE;
+              return (await stat(p)).size;
+            }),
+          ),
       };
       // Identity resolver: the unredacted-original decoration is a MediaStore
       // concern with no analogue against real files on disk.
       const walker = createMediaWalker(fakeLibrary, sizer, {
-        resolveReadUri: async (uri: string) => uri,
+        resolveReadUris: async (uris: string[]) => uris,
       });
 
       // FileSource that rewrites content:// URIs to real disk paths before

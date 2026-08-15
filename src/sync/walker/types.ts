@@ -25,10 +25,11 @@ export interface WalkerEntry {
 
 export interface SourceWalker {
   /**
-   * Enumerate the source. Implementations SHOULD yield entries lazily where
-   * possible so the engine can start hashing the first few files while the
-   * walker still discovers the tail — but bulk-yielding from an in-memory
-   * list is also fine (the Android SAF walker does this for v1).
+   * Enumerate the source. Implementations MUST yield entries lazily: the engine
+   * publishes its scan counters and polls for cancellation between yields, so a
+   * walker that buffers the whole tree before yielding leaves the UI frozen on
+   * "Scanning…" and makes Cancel a no-op for the duration. Both walkers stream —
+   * SAF via native batch events, media via MediaStore pages.
    */
   walk(sourceUri: string): AsyncIterable<WalkerEntry>;
 }

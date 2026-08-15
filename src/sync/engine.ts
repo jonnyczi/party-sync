@@ -4,15 +4,10 @@ import { Up2kError } from '../copyparty/types';
 import { uploadFile } from '../copyparty/up2k';
 import type { SqliteDb } from '../db/adapter';
 import * as fileStateDao from '../db/file_state';
+import type { FileStateSyncKey } from '../db/file_state';
 import { clampConcurrency, getJob } from '../db/jobs';
 import * as runsDao from '../db/runs';
-import type {
-  ErrorPhase,
-  FileStateRow,
-  RunRow,
-  RunStatus,
-  RunTrigger,
-} from '../db/types';
+import type { ErrorPhase, RunRow, RunStatus, RunTrigger } from '../db/types';
 
 import { dateSubdir } from './path-organization';
 import { ProgressBus } from './progress';
@@ -33,6 +28,13 @@ const HTTP_RETRY_BACKOFF_MS = [1000, 2000];
 // screens (run detail, history) reflect progress without waiting for the run to
 // finish, and (b) a run interrupted by an app kill keeps its partial numbers.
 const COUNTER_PERSIST_INTERVAL_MS = 1000;
+
+// How often scan-phase counters are published to the ProgressBus, and the batch
+// size that publishes early regardless. Every publish re-renders every
+// subscribed screen, and a fast walker yields 10k entries in a couple of
+// seconds, so the scan reports deltas rather than per-entry.
+const SCAN_PROGRESS_INTERVAL_MS = 250;
+const SCAN_PROGRESS_MIN_BATCH = 200;
 
 export interface EngineOptions {
   db: SqliteDb;
@@ -138,6 +140,30 @@ export async function runJob(
     // already loaded above, so this costs one Map lookup per entry.
     const entries: WalkerEntry[] = [];
     let totalBytes = 0;
+    // `bumpCounters` is additive and notifies every subscribed screen, so track
+    // what has been published and send deltas on an interval. Publishing per
+    // entry would be 10k re-renders on a large folder; publishing only at the
+    // end (what this used to do) left the UI on "Scanning… 0/0" throughout.
+    let publishedScanned = 0;
+    let publishedSkipped = 0;
+    let lastScanPublishAt = 0;
+    const publishScan = (force = false): void => {
+      const dScanned = scanned - publishedScanned;
+      const dSkipped = skipped - publishedSkipped;
+      if (dScanned === 0 && dSkipped === 0) return;
+      if (
+        !force &&
+        dScanned < SCAN_PROGRESS_MIN_BATCH &&
+        now() - lastScanPublishAt < SCAN_PROGRESS_INTERVAL_MS
+      ) {
+        return;
+      }
+      lastScanPublishAt = now();
+      publishedScanned = scanned;
+      publishedSkipped = skipped;
+      progress.bumpCounters({ scanned: dScanned, skipped: dSkipped });
+    };
+
     for await (const entry of opts.walker.walk(job.source_uri)) {
       if (runControl.isCancelRequested(runId)) break;
       // Retry-failed scopes the run to a prior run's failed files.
@@ -146,12 +172,14 @@ export async function runJob(
       scanned++;
       if (isAlreadySynced(existing.get(entry.localPath), entry)) {
         skipped++;
-        continue;
+      } else {
+        entries.push(entry);
+        totalBytes += entry.size;
       }
-      entries.push(entry);
-      totalBytes += entry.size;
+      publishScan();
     }
-    progress.bumpCounters({ scanned, skipped });
+    // Flush the last partial batch so the published counters are exact.
+    publishScan(true);
     progress.setTotals({ totalFiles: entries.length, totalBytes });
     // Persist the scan result immediately so a DB-backed screen shows the
     // denominator (and the skip count) while the upload phase runs.
@@ -314,9 +342,9 @@ export async function runJob(
 async function loadFileState(
   db: SqliteDb,
   jobId: number,
-): Promise<Map<string, FileStateRow>> {
-  const rows = await fileStateDao.listFileStateForJob(db, jobId);
-  const m = new Map<string, FileStateRow>();
+): Promise<Map<string, FileStateSyncKey>> {
+  const rows = await fileStateDao.listSyncedFileStateForJob(db, jobId);
+  const m = new Map<string, FileStateSyncKey>();
   for (const r of rows) m.set(r.local_path, r);
   return m;
 }
@@ -324,16 +352,19 @@ async function loadFileState(
 /**
  * Cheap "nothing to do" test: we uploaded this exact path before and neither
  * its size nor its mtime has moved since. Deliberately does not hash — that is
- * the whole point of the short-circuit. `uploaded_at === null` means a prior
- * run hashed the file but never finished sending it, so it still needs work.
+ * the whole point of the short-circuit. A file a prior run hashed but never
+ * finished sending has no row here at all (see `listSyncedFileStateForJob`), so
+ * it still needs work.
+ *
+ * The equality here is why the walkers must report size/mtime *exactly* as they
+ * always have: any drift re-uploads every file every user already has.
  */
 function isAlreadySynced(
-  prior: FileStateRow | undefined,
+  prior: FileStateSyncKey | undefined,
   entry: WalkerEntry,
 ): boolean {
   return (
     prior !== undefined &&
-    prior.uploaded_at !== null &&
     prior.size === entry.size &&
     prior.mtime_ms === entry.mtimeMs
   );

@@ -265,8 +265,8 @@ function ActiveRunCard({
   const scheme = useColorScheme() ?? 'light';
   const { batch } = useSyncAll();
   const phase = batch
-    ? `job ${Math.min(batch.completed + 1, batch.total)}/${batch.total} · ${phaseLabel(run.phase)}`
-    : phaseLabel(run.phase);
+    ? `job ${Math.min(batch.completed + 1, batch.total)}/${batch.total} · ${phaseLabel(run)}`
+    : phaseLabel(run);
   const onCancelPress = () => {
     Alert.alert(
       'Cancel sync?',

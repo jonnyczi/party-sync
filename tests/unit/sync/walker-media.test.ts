@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { SIZE_UNAVAILABLE } from '@/modules/copyparty-sha512/src/CopypartySha512.types';
 import { createMediaWalker, MEDIA_SOURCE_ALL } from '@/src/sync/walker/media';
 import type { WalkerEntry } from '@/src/sync/walker/types';
 
@@ -43,25 +44,41 @@ function fakeLibrary(
   };
 }
 
+/**
+ * Batch sizer. A per-URI `Error` in the map becomes {@link SIZE_UNAVAILABLE} in
+ * the returned array — the native side reports per-item failures as a sentinel
+ * rather than rejecting, so one vanished asset can't take a whole page with it.
+ * `calls` records each batch so tests can assert the batching itself.
+ */
 function fakeSizer(sizes: Record<string, number | Error>) {
+  const calls: string[][] = [];
   return {
-    size: async (uri: string) => {
-      const v = sizes[uri];
-      if (v === undefined) throw new Error(`fake sizer: no size for ${uri}`);
-      if (v instanceof Error) throw v;
-      return v;
+    calls,
+    sizes: async (uris: string[]) => {
+      calls.push(uris);
+      return uris.map((uri) => {
+        const v = sizes[uri];
+        if (v === undefined || v instanceof Error) return SIZE_UNAVAILABLE;
+        return v;
+      });
     },
   };
 }
 
 /** Identity by default — production decorates MediaStore URIs for unredacted
- *  reads, but that's orthogonal to enumeration, which these tests cover. */
-function fakeResolver(map: Record<string, string | Error> = {}) {
+ *  reads, but that's orthogonal to enumeration, which these tests cover.
+ *  Pass `rejectWith` to model the whole batch call failing. */
+function fakeResolver(
+  map: Record<string, string> = {},
+  rejectWith?: Error,
+) {
+  const calls: string[][] = [];
   return {
-    resolveReadUri: async (uri: string) => {
-      const v = map[uri];
-      if (v instanceof Error) throw v;
-      return v ?? uri;
+    calls,
+    resolveReadUris: async (uris: string[]) => {
+      calls.push(uris);
+      if (rejectWith) throw rejectWith;
+      return uris.map((uri) => map[uri] ?? uri);
     },
   };
 }
@@ -147,7 +164,7 @@ describe('mediaWalker', () => {
     expect(library.calls[1].after).toBe('cA');
   });
 
-  it('skips assets whose size() throws (disappeared between enumeration and stat)', async () => {
+  it('skips assets reported SIZE_UNAVAILABLE without shifting the rest of the page', async () => {
     const library = fakeLibrary([
       {
         assets: [
@@ -170,6 +187,54 @@ describe('mediaWalker', () => {
     const out = await collect(walker.walk(MEDIA_SOURCE_ALL));
 
     expect(out.map((e) => e.relativePath)).toEqual(['ok.jpg', 'also-ok.jpg']);
+    // Index alignment: the survivors keep their own sizes rather than
+    // inheriting the next asset's.
+    expect(out.map((e) => e.size)).toEqual([10, 30]);
+  });
+
+  it('stats and resolves once per page, not once per asset', async () => {
+    // The whole point of the batch interfaces: a 10k-asset library used to cost
+    // 20k serialized native round trips before the first byte uploaded.
+    const library = fakeLibrary([
+      {
+        assets: [
+          { id: '1', filename: 'a.jpg', mediaType: 'photo', modificationTime: 1 },
+          { id: '2', filename: 'b.jpg', mediaType: 'photo', modificationTime: 2 },
+          { id: '3', filename: 'c.mp4', mediaType: 'video', modificationTime: 3 },
+        ],
+        endCursor: 'cA',
+        hasNextPage: true,
+        totalCount: 4,
+      },
+      {
+        assets: [
+          { id: '4', filename: 'd.jpg', mediaType: 'photo', modificationTime: 4 },
+        ],
+        endCursor: 'cB',
+        hasNextPage: false,
+        totalCount: 4,
+      },
+    ]);
+    const sizer = fakeSizer({
+      'content://media/external/images/media/1': 10,
+      'content://media/external/images/media/2': 20,
+      'content://media/external/video/media/3': 30,
+      'content://media/external/images/media/4': 40,
+    });
+    const resolver = fakeResolver();
+
+    const walker = createMediaWalker(library, sizer, resolver);
+    await collect(walker.walk(MEDIA_SOURCE_ALL));
+
+    expect(sizer.calls).toEqual([
+      [
+        'content://media/external/images/media/1',
+        'content://media/external/images/media/2',
+        'content://media/external/video/media/3',
+      ],
+      ['content://media/external/images/media/4'],
+    ]);
+    expect(resolver.calls).toEqual(sizer.calls);
   });
 
   it('skips unknown mediaType rows (audio, unknown)', async () => {
@@ -270,7 +335,7 @@ describe('mediaWalker', () => {
     const walker = createMediaWalker(
       library,
       fakeSizer({ [bare]: 10 }),
-      fakeResolver({ [bare]: new Error('resolver blew up') }),
+      fakeResolver({}, new Error('resolver blew up')),
     );
 
     const out = await collect(walker.walk(MEDIA_SOURCE_ALL));
