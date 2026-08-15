@@ -38,6 +38,7 @@ import {
 import { getLatestRunForJob } from '@/src/db/runs';
 import { listServers } from '@/src/db/servers';
 import type { PathOrganization, ServerRow, SourceKind } from '@/src/db/types';
+import { missingRequirement } from '@/src/job-requirements';
 import { listMediaAlbums, type AlbumOption } from '@/src/media/albums';
 import { treeUriToDocumentUri } from '@/src/storage/saf-uri';
 import { getServerPassword } from '@/src/storage/secrets';
@@ -123,8 +124,15 @@ export function JobForm({ jobId }: { jobId: number | null }) {
   const [lastRunStartedAt, setLastRunStartedAt] = useState<number | null>(null);
 
   useEffect(() => {
-    listServers(db).then(setServers);
-  }, [db]);
+    listServers(db).then((rows) => {
+      setServers(rows);
+      // First job on a fresh install: with a single server there is nothing to
+      // choose, and leaving serverId null makes Save inert. The functional
+      // update keeps a selection the user already made if their tap beat the
+      // load; the isNew guard keeps this clear of the edit path below.
+      if (isNew && rows.length === 1) setServerId((cur) => cur ?? rows[0].id);
+    });
+  }, [db, isNew]);
 
   useEffect(() => {
     if (jobId === null) return;
@@ -217,14 +225,26 @@ export function JobForm({ jobId }: { jobId: number | null }) {
   const pick = useAsyncAction(pickFolder, { handsOff: true });
   const browse = useAsyncAction(onBrowse);
 
-  const canSave =
-    serverId !== null &&
-    name.trim().length > 0 &&
-    sourceUri.length > 0 &&
-    normalizeRemotePath(remotePath).length > 0;
+  const missing = missingRequirement({
+    hasServers: servers.length > 0,
+    serverId,
+    name,
+    sourceKind,
+    sourceUri,
+    remotePath,
+  });
+  const canSave = missing === null;
 
   const save = async () => {
-    if (!canSave || saving || serverId === null) return;
+    if (saving) return;
+    // Save sits in the navigator header, where a greyed-out label reads as
+    // chrome rather than a disabled control — so an incomplete form has to say
+    // what is missing instead of swallowing the tap.
+    if (missing !== null) {
+      Alert.alert("Can't save yet", missing);
+      return;
+    }
+    if (serverId === null) return; // unreachable: missingRequirement covers it, but TS can't tell
     setSaving(true);
     const clampedMinutes = Math.max(PERIODIC_MIN_INTERVAL_MIN, periodicMinutes);
     const input = {
@@ -448,9 +468,15 @@ export function JobForm({ jobId }: { jobId: number | null }) {
           headerRight: () => (
             <Pressable
               onPress={save}
-              disabled={!canSave || saving}
+              // Stays pressable while the form is incomplete so the tap can
+              // explain itself; `saving` alone guards against double-submit.
+              // Deliberately no accessibilityState.disabled — that can suppress
+              // activation in TalkBack, recreating the dead tap for the users
+              // least able to diagnose it. The hint carries the reason instead.
+              disabled={saving}
               hitSlop={8}
-              accessibilityLabel="Save job">
+              accessibilityLabel="Save job"
+              accessibilityHint={missing ?? undefined}>
               <ThemedText
                 type="defaultSemiBold"
                 style={{ color: canSave ? Colors[scheme].tint : Colors[scheme].icon }}>
