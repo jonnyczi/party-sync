@@ -5,16 +5,24 @@ import type { SqliteDb } from '../db/adapter';
 import { listJobs } from '../db/jobs';
 import { basename } from '../format';
 import { getMediaReadState, getOriginalBytesState } from '../media/media-permission';
-import { probeSafAccess } from '../storage/saf';
+import { probeSafFolder } from '../storage/saf';
 
-import {
-  evaluateAppPermissions,
-  type PermissionItem,
-  type SafFolderProbe,
+import type {
+  PermissionProbeState,
+  SafAccess,
+  SafFolderProbe,
 } from './permissions-eval';
 
 /**
  * On-device collector feeding the pure evaluator (permissions-eval.ts).
+ *
+ * Split into two phases because the inputs have wildly different costs. Phase 1
+ * is three permission checks, one native call and one SELECT — milliseconds.
+ * Phase 2 is one SAF tree probe per folder job, which even natively is a round
+ * trip to a storage provider that may be asleep. Rendering phase 1 first is
+ * what stops the screen sitting empty behind the slow half; the folder rows
+ * come back 'checking' so their section, heading and explanation are all on the
+ * first frame rather than popping in late.
  *
  * Deliberately gates on the platform alone, unlike `readSyncHealth` — that one
  * also bails when the native module is null because every one of its probes is
@@ -25,8 +33,30 @@ import {
  * Never prompts: a screen that raises a permission dialog just for being opened
  * is exactly the behaviour the screen exists to make unnecessary.
  */
-export async function readAppPermissions(db: SqliteDb): Promise<PermissionItem[]> {
-  if (Platform.OS !== 'android') return [];
+
+/** What phase 1 hands to phase 2, so the DB is read once rather than twice. */
+export interface FastPermissions {
+  /**
+   * Renderable as-is: pass it to `evaluateAppPermissions` and every row exists,
+   * with the folder rows carrying access 'checking'. Callers evaluate rather
+   * than being handed items, because a caller with cached folder answers wants
+   * to patch this first (see hooks/use-app-permissions.ts).
+   */
+  state: PermissionProbeState;
+  /** Folder jobs still owing a tree probe — unset ones are already settled. */
+  pending: { jobId: number; sourceUri: string }[];
+}
+
+/** Phase 1 — everything that answers in milliseconds. */
+export async function readAppPermissionsFast(db: SqliteDb): Promise<FastPermissions> {
+  const empty: PermissionProbeState = {
+    mediaRead: 'unsupported',
+    originalBytes: 'unsupported',
+    notificationsEnabled: true,
+    hasMediaJob: false,
+    safFolders: [],
+  };
+  if (Platform.OS !== 'android') return { state: empty, pending: [] };
 
   const [mediaRead, originalBytes, notificationsEnabled, jobs] = await Promise.all([
     getMediaReadState(),
@@ -35,17 +65,54 @@ export async function readAppPermissions(db: SqliteDb): Promise<PermissionItem[]
     listJobs(db),
   ]);
 
-  const safFolders = await Promise.all(
-    jobs.filter((j) => j.source_kind === 'saf').map(probeFolder),
-  );
+  const safJobs = jobs.filter((j) => j.source_kind === 'saf');
+  const safFolders: SafFolderProbe[] = safJobs.map((job) => ({
+    jobId: job.id,
+    name: job.name,
+    folderLabel: decodeURIComponent(basename(job.source_uri)) || 'Folder',
+    unset: job.source_uri === '',
+    // An unset job needs no probe: that answer is already final.
+    access: job.source_uri === '' ? 'lost' : 'checking',
+  }));
 
-  return evaluateAppPermissions({
+  const state: PermissionProbeState = {
     mediaRead,
     originalBytes,
     notificationsEnabled,
     hasMediaJob: jobs.some((j) => j.source_kind === 'media'),
     safFolders,
-  });
+  };
+
+  return {
+    state,
+    pending: safJobs
+      .filter((j) => j.source_uri !== '')
+      .map((j) => ({ jobId: j.id, sourceUri: j.source_uri })),
+  };
+}
+
+/**
+ * Phase 2 — the SAF tree probes, parallel across jobs. Returns the same probe
+ * state with every folder settled, ready to re-evaluate. A folder that never
+ * answers settles to 'unknown', not 'lost'.
+ */
+export async function resolveSafFolders(
+  fast: FastPermissions,
+): Promise<PermissionProbeState> {
+  const answers = new Map<number, SafAccess>();
+
+  await Promise.all(
+    fast.pending.map(async (p) => {
+      answers.set(p.jobId, await probeSafFolder(p.sourceUri));
+    }),
+  );
+
+  return {
+    ...fast.state,
+    safFolders: fast.state.safFolders.map((f) =>
+      f.unset ? f : { ...f, access: answers.get(f.jobId) ?? f.access },
+    ),
+  };
 }
 
 /**
@@ -70,19 +137,4 @@ async function readNotificationsEnabled(): Promise<boolean> {
   const systemEnabled = CopypartySync?.areNotificationsEnabled?.() ?? true;
 
   return grantHeld && systemEnabled;
-}
-
-async function probeFolder(job: {
-  id: number;
-  name: string;
-  source_uri: string;
-}): Promise<SafFolderProbe> {
-  const unset = job.source_uri === '';
-  return {
-    jobId: job.id,
-    name: job.name,
-    folderLabel: decodeURIComponent(basename(job.source_uri)) || 'Folder',
-    unset,
-    accessible: unset ? false : await probeSafAccess(job.source_uri),
-  };
 }

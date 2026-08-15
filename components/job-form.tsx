@@ -22,6 +22,7 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors } from '@/constants/theme';
+import { useAsyncAction } from '@/hooks/use-async-action';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { normalizeRemotePath } from '@/src/copyparty/paths';
 import { testJobConnection } from '@/src/copyparty/test-connection';
@@ -38,6 +39,7 @@ import { getLatestRunForJob } from '@/src/db/runs';
 import { listServers } from '@/src/db/servers';
 import type { PathOrganization, ServerRow, SourceKind } from '@/src/db/types';
 import { listMediaAlbums, type AlbumOption } from '@/src/media/albums';
+import { treeUriToDocumentUri } from '@/src/storage/saf-uri';
 import { getServerPassword } from '@/src/storage/secrets';
 import CopypartySync from '@/modules/copyparty-sync';
 import { hasBlockedItem, readSyncHealth } from '@/src/sync/health';
@@ -170,7 +172,12 @@ export function JobForm({ jobId }: { jobId: number | null }) {
 
   const pickFolder = async () => {
     try {
-      const res = await FileSystem.StorageAccessFramework.requestDirectoryPermissionsAsync();
+      // Open where the job already points, so a re-pick is one tap instead of a
+      // walk down from Recents — and so it is harder to land on the wrong
+      // folder, which would silently repoint the job and re-upload everything.
+      const res = await FileSystem.StorageAccessFramework.requestDirectoryPermissionsAsync(
+        treeUriToDocumentUri(sourceUri),
+      );
       if (!res.granted) return;
       setSourceUri(res.directoryUri);
     } catch (e) {
@@ -202,6 +209,13 @@ export function JobForm({ jobId }: { jobId: number | null }) {
     setSourceKind(next);
     setSourceUri(next === 'media' ? MEDIA_SOURCE_ALL : '');
   };
+
+  // Two of the three actions that leave the user looking at an unchanged
+  // screen: the SAF picker is another Activity, and the Browse tap reads the
+  // Keystore before the modal can mount. (The third is below, next to the
+  // handler it wraps.)
+  const pick = useAsyncAction(pickFolder, { handsOff: true });
+  const browse = useAsyncAction(onBrowse);
 
   const canSave =
     serverId !== null &&
@@ -304,6 +318,10 @@ export function JobForm({ jobId }: { jobId: number | null }) {
       );
     }
   };
+
+  // Waits on the permission dialog and then readSyncHealth's five synchronous
+  // binder probes, so the switch would otherwise sit still through both.
+  const periodicToggle = useAsyncAction(onTogglePeriodic);
 
   const onChangePeriodicMinutes = (t: string) => {
     setPeriodicMinutesText(t);
@@ -538,16 +556,37 @@ export function JobForm({ jobId }: { jobId: number | null }) {
           {sourceKind === 'saf' ? (
             <Field label="Local folder">
               <Pressable
-                onPress={pickFolder}
+                onPress={pick.run}
+                disabled={pick.pending}
+                accessibilityState={{ disabled: pick.pending, busy: pick.pending }}
                 style={({ pressed }) => [
                   styles.pickBtn,
-                  { borderColor: Colors[scheme].icon, opacity: pressed ? 0.7 : 1 },
+                  {
+                    borderColor: Colors[scheme].icon,
+                    opacity: pick.pending ? 0.5 : pressed ? 0.7 : 1,
+                  },
                 ]}>
-                <IconSymbol name="folder.fill" color={Colors[scheme].tint} size={20} />
+                {/* Swap rather than add, so the row height does not jump. */}
+                {pick.pending ? (
+                  <ActivityIndicator size="small" color={Colors[scheme].tint} />
+                ) : (
+                  <IconSymbol name="folder.fill" color={Colors[scheme].tint} size={20} />
+                )}
                 <ThemedText style={{ color: Colors[scheme].tint }}>
-                  {sourceUri ? 'Change folder' : 'Pick folder…'}
+                  {pick.pending
+                    ? 'Opening picker…'
+                    : sourceUri
+                      ? 'Change folder'
+                      : 'Pick folder…'}
                 </ThemedText>
               </Pressable>
+              <ThemedText style={styles.hint}>
+                {sourceUri
+                  ? 'Opens where you last picked. Pick the same folder unless you mean to ' +
+                    'move this job — a different folder re-uploads everything.'
+                  : "Android's own folder picker opens next. A folder with a lot of files " +
+                    'can take a few seconds to list.'}
+              </ThemedText>
               {sourceUri ? (
                 <ThemedText style={styles.uri} numberOfLines={2}>
                   {decodeURIComponent(sourceUri)}
@@ -598,27 +637,32 @@ export function JobForm({ jobId }: { jobId: number | null }) {
                 autoCorrect={false}
               />
               <Pressable
-                onPress={onBrowse}
-                disabled={serverId === null}
+                onPress={browse.run}
+                disabled={serverId === null || browse.pending}
+                accessibilityState={{ busy: browse.pending }}
                 style={({ pressed }) => [
                   styles.browseBtn,
                   {
                     borderColor:
                       serverId === null ? Colors[scheme].icon : Colors[scheme].tint,
-                    opacity: pressed ? 0.7 : 1,
+                    opacity: browse.pending ? 0.5 : pressed ? 0.7 : 1,
                   },
                 ]}>
-                <IconSymbol
-                  name="folder.fill"
-                  color={serverId === null ? Colors[scheme].icon : Colors[scheme].tint}
-                  size={18}
-                />
+                {browse.pending ? (
+                  <ActivityIndicator size="small" color={Colors[scheme].tint} />
+                ) : (
+                  <IconSymbol
+                    name="folder.fill"
+                    color={serverId === null ? Colors[scheme].icon : Colors[scheme].tint}
+                    size={18}
+                  />
+                )}
                 <ThemedText
                   style={{
                     color: serverId === null ? Colors[scheme].icon : Colors[scheme].tint,
                     fontWeight: '600',
                   }}>
-                  Browse
+                  {browse.pending ? 'Loading…' : 'Browse'}
                 </ThemedText>
               </Pressable>
             </View>
@@ -686,7 +730,8 @@ export function JobForm({ jobId }: { jobId: number | null }) {
 
           <SchedulePanel
             enabled={periodicEnabled}
-            onToggleEnabled={onTogglePeriodic}
+            onToggleEnabled={periodicToggle.run}
+            togglePending={periodicToggle.pending}
             minutesText={periodicMinutesText}
             onChangeMinutesText={onChangePeriodicMinutes}
             onCommitMinutes={commitPeriodicMinutes}
@@ -793,6 +838,8 @@ export function JobForm({ jobId }: { jobId: number | null }) {
 function SchedulePanel(props: {
   enabled: boolean;
   onToggleEnabled: (next: boolean) => void;
+  /** Enabling waits on a permission dialog and a health probe — see JobForm. */
+  togglePending: boolean;
   minutesText: string;
   onChangeMinutesText: (t: string) => void;
   onCommitMinutes: () => void;
@@ -820,7 +867,11 @@ function SchedulePanel(props: {
       <ThemedText style={styles.fieldLabel}>Schedule</ThemedText>
       <View style={styles.scheduleRow}>
         <ThemedText style={{ flex: 1 }}>Periodic background sync</ThemedText>
-        <Switch value={props.enabled} onValueChange={props.onToggleEnabled} />
+        <Switch
+          value={props.enabled}
+          onValueChange={props.onToggleEnabled}
+          disabled={props.togglePending}
+        />
       </View>
       {props.enabled ? (
         <>

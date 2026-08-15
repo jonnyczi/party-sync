@@ -1,18 +1,28 @@
-import { useFocusEffect, useRouter } from 'expo-router';
+import { useRouter } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, AppState, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { useCallback } from 'react';
+import {
+  ActivityIndicator,
+  Alert,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  View,
+} from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors } from '@/constants/theme';
+import { useAppPermissions } from '@/hooks/use-app-permissions';
+import { useAsyncAction } from '@/hooks/use-async-action';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import CopypartySync from '@/modules/copyparty-sync';
 import { APP_NAME } from '@/src/app-name';
 import { requestMediaReadAccess } from '@/src/media/media-permission';
 import { requestOriginalBytesWithEscalation } from '@/src/media/request-original-bytes';
-import { readAppPermissions } from '@/src/permissions/permissions';
 import type {
   PermissionAction,
   PermissionItem,
@@ -35,37 +45,8 @@ export default function PermissionsScreen() {
   const db = useSQLiteContext();
   const router = useRouter();
   const scheme = useColorScheme() ?? 'light';
-  const [items, setItems] = useState<PermissionItem[]>([]);
-  const generation = useRef(0);
-
-  const probe = useCallback(() => {
-    // Probing a SAF tree has unbounded latency (unmounted storage can hang),
-    // and focus + resume routinely fire together, so two probes overlap and the
-    // slower one must not overwrite the newer answer.
-    const mine = ++generation.current;
-    readAppPermissions(db)
-      .then((next) => {
-        if (mine === generation.current) setItems(next);
-      })
-      .catch((e) => console.warn('[copyparty] permission probe failed', e));
-  }, [db]);
-
-  // Both triggers are load-bearing and neither subsumes the other: returning
-  // from a system settings Activity is an AppState change with no focus event,
-  // while dismissing the job edit modal after re-picking a folder is a focus
-  // event with no AppState change. (useFocusEffect also covers mount.)
-  useFocusEffect(
-    useCallback(() => {
-      probe();
-    }, [probe]),
-  );
-
-  useEffect(() => {
-    const sub = AppState.addEventListener('change', (state) => {
-      if (state === 'active') probe();
-    });
-    return () => sub.remove();
-  }, [probe]);
+  const insets = useSafeAreaInsets();
+  const { items, refresh } = useAppPermissions(db);
 
   const onAction = useCallback(
     async (item: PermissionItem) => {
@@ -75,7 +56,7 @@ export default function PermissionsScreen() {
             await grantMediaRead();
             break;
           case 'request_original_bytes':
-            await requestOriginalBytesWithEscalation(probe);
+            await requestOriginalBytesWithEscalation(refresh);
             break;
           case 'request_notifications':
             await grantNotifications();
@@ -92,10 +73,10 @@ export default function PermissionsScreen() {
       } finally {
         // An in-app request never backgrounds the app, so nothing else would
         // refresh the row it just changed.
-        probe();
+        refresh();
       }
     },
-    [probe, router],
+    [refresh, router],
   );
 
   if (Platform.OS !== 'android') {
@@ -111,7 +92,8 @@ export default function PermissionsScreen() {
 
   return (
     <ThemedView style={styles.container}>
-      <ScrollView contentContainerStyle={styles.scroll}>
+      <ScrollView
+        contentContainerStyle={[styles.scroll, { paddingBottom: insets.bottom + 16 }]}>
         <ThemedText style={styles.blurb}>
           These are the app-wide permissions Android lists under App info → Permissions.
           {' '}{APP_NAME} asks for the minimum it needs; each one below is either required by
@@ -215,13 +197,33 @@ function PermissionRow({
   onAction: (item: PermissionItem) => void;
 }) {
   const c = Colors[scheme];
+  // 'app_settings' leaves for a system screen and so clears on backgrounding;
+  // the in-app requests resolve when the user answers the dialog. Per-row, so a
+  // pending action survives the re-probe that rebuilds `items` underneath it.
+  const handsOff = item.action === 'app_settings';
+  const act = useAsyncAction(() => onAction(item), {
+    handsOff,
+    errorTitle: handsOff ? 'Could not open app settings' : undefined,
+    errorBody: handsOff
+      ? `You can get there from Android Settings → Apps → ${APP_NAME}.`
+      : undefined,
+  });
+
   return (
     <View style={[styles.row, { borderColor: c.border }]}>
-      <IconSymbol
-        name={statusIcon(item.status)}
-        color={statusTint(item.status, scheme)}
-        size={22}
-      />
+      {item.status === 'checking' ? (
+        // Same 22pt slot as the icon it replaces, so the row does not shift
+        // when the folder probe lands.
+        <View style={styles.statusSlot}>
+          <ActivityIndicator size="small" color={c.muted} />
+        </View>
+      ) : (
+        <IconSymbol
+          name={statusIcon(item.status)}
+          color={statusTint(item.status, scheme)}
+          size={22}
+        />
+      )}
       <View style={styles.rowBody}>
         <View style={styles.titleRow}>
           <ThemedText type="defaultSemiBold" style={styles.title}>
@@ -237,15 +239,22 @@ function PermissionRow({
         ) : null}
         {item.action ? (
           <Pressable
-            onPress={() => onAction(item)}
+            onPress={act.run}
+            disabled={act.pending}
             accessibilityRole="button"
             accessibilityLabel={`${actionLabel(item.action)} for ${item.title}`}
+            accessibilityState={{ disabled: act.pending, busy: act.pending }}
             style={({ pressed }) => [
               styles.actionButton,
-              { borderColor: c.tint, opacity: pressed ? 0.6 : 1 },
+              { borderColor: c.tint, opacity: act.pending ? 0.5 : pressed ? 0.6 : 1 },
             ]}>
+            {act.pending ? <ActivityIndicator size="small" color={c.tint} /> : null}
             <ThemedText style={[styles.actionLabel, { color: c.tint }]}>
-              {actionLabel(item.action)}
+              {act.pending
+                ? handsOff
+                  ? 'Opening…'
+                  : 'Asking…'
+                : actionLabel(item.action)}
             </ThemedText>
           </Pressable>
         ) : null}
@@ -254,7 +263,10 @@ function PermissionRow({
   );
 }
 
-function statusIcon(status: PermissionStatus) {
+/** 'checking' renders a spinner instead of an icon, so it never reaches these. */
+type SettledStatus = Exclude<PermissionStatus, 'checking'>;
+
+function statusIcon(status: SettledStatus) {
   switch (status) {
     case 'ok':
       return 'checkmark.circle.fill' as const;
@@ -265,7 +277,7 @@ function statusIcon(status: PermissionStatus) {
   }
 }
 
-function statusTint(status: PermissionStatus, scheme: 'light' | 'dark'): string {
+function statusTint(status: SettledStatus, scheme: 'light' | 'dark'): string {
   const c = Colors[scheme];
   switch (status) {
     case 'ok':
@@ -330,12 +342,16 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
   },
   rowBody: { flex: 1, gap: 4 },
+  statusSlot: { width: 22, alignItems: 'center' },
   titleRow: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
   title: { flexShrink: 1 },
   pill: { fontSize: 11, fontWeight: '700', letterSpacing: 0.5 },
   detail: { opacity: 0.7, fontSize: 13, lineHeight: 18 },
   actionButton: {
     alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
     borderWidth: 1,
     borderRadius: 8,
     paddingHorizontal: 12,

@@ -1,12 +1,14 @@
 import { useRouter } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useCallback, useEffect, useState } from 'react';
-import { Alert, Pressable, StyleSheet, Switch, View } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, Switch, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors } from '@/constants/theme';
+import { useAsyncAction } from '@/hooks/use-async-action';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { APP_NAME } from '@/src/app-name';
 import {
@@ -35,6 +37,7 @@ export default function SettingsScreen() {
   const db = useSQLiteContext();
   const router = useRouter();
   const scheme = useColorScheme() ?? 'light';
+  const insets = useSafeAreaInsets();
   const [notifyEnabled, setNotifyEnabled] = useState(true);
   const [bandwidth, setBandwidth] = useState<BandwidthMode>('full');
 
@@ -105,132 +108,144 @@ export default function SettingsScreen() {
     [db],
   );
 
+  // Turning it on waits on the system permission dialog, so the switch would
+  // otherwise sit in its old position with no sign anything happened.
+  const notifyToggle = useAsyncAction(onToggleNotify);
+
   return (
     <ThemedView style={styles.container}>
-      <View style={styles.section}>
-        <ThemedText type="subtitle">Notifications</ThemedText>
-        <View style={styles.toggleRow}>
-          <View style={styles.toggleText}>
-            <ThemedText type="defaultSemiBold">Sync results</ThemedText>
-            <ThemedText style={styles.rowSub}>
-              Notify when a sync finishes or fails. Per-job in each job&apos;s settings.
-            </ThemedText>
+      <ScrollView
+        contentContainerStyle={[styles.scroll, { paddingBottom: insets.bottom + 16 }]}>
+        <View style={styles.section}>
+          <ThemedText type="subtitle">Notifications</ThemedText>
+          <View style={styles.toggleRow}>
+            <View style={styles.toggleText}>
+              <ThemedText type="defaultSemiBold">Sync results</ThemedText>
+              <ThemedText style={styles.rowSub}>
+                Notify when a sync finishes or fails. Per-job in each job&apos;s settings.
+              </ThemedText>
+            </View>
+            <Switch
+              value={notifyEnabled}
+              onValueChange={notifyToggle.run}
+              disabled={notifyToggle.pending}
+            />
           </View>
-          <Switch value={notifyEnabled} onValueChange={onToggleNotify} />
         </View>
-      </View>
 
-      <View style={styles.section}>
-        <ThemedText type="subtitle">Bandwidth</ThemedText>
-        <View style={styles.pickerList}>
-          {BANDWIDTH_OPTIONS.map(({ mode, label, detail }) => {
-            const selected = bandwidth === mode;
-            return (
-              <Pressable
-                key={mode}
-                onPress={() => onPickBandwidth(mode)}
-                accessibilityRole="radio"
-                accessibilityState={{ selected }}
-                accessibilityLabel={`Bandwidth: ${label}`}
-                style={({ pressed }) => [
-                  styles.pickerRow,
-                  selected
-                    ? { borderColor: Colors[scheme].tint, borderWidth: 2 }
-                    : { borderColor: Colors[scheme].icon },
-                  { opacity: pressed ? 0.7 : 1 },
-                ]}>
-                <View style={{ flex: 1, gap: 2 }}>
-                  <ThemedText type="defaultSemiBold">{label}</ThemedText>
-                  <ThemedText style={styles.rowSub}>{detail}</ThemedText>
-                </View>
-                {selected ? (
-                  <IconSymbol
-                    name="checkmark.circle.fill"
-                    color={Colors[scheme].tint}
-                    size={22}
-                  />
-                ) : null}
-              </Pressable>
-            );
-          })}
+        <View style={styles.section}>
+          <ThemedText type="subtitle">Bandwidth</ThemedText>
+          <View style={styles.pickerList}>
+            {BANDWIDTH_OPTIONS.map(({ mode, label, detail }) => {
+              const selected = bandwidth === mode;
+              return (
+                <Pressable
+                  key={mode}
+                  onPress={() => onPickBandwidth(mode)}
+                  accessibilityRole="radio"
+                  accessibilityState={{ selected }}
+                  accessibilityLabel={`Bandwidth: ${label}`}
+                  style={({ pressed }) => [
+                    styles.pickerRow,
+                    selected
+                      ? { borderColor: Colors[scheme].tint, borderWidth: 2 }
+                      : { borderColor: Colors[scheme].icon },
+                    { opacity: pressed ? 0.7 : 1 },
+                  ]}>
+                  <View style={{ flex: 1, gap: 2 }}>
+                    <ThemedText type="defaultSemiBold">{label}</ThemedText>
+                    <ThemedText style={styles.rowSub}>{detail}</ThemedText>
+                  </View>
+                  {selected ? (
+                    <IconSymbol
+                      name="checkmark.circle.fill"
+                      color={Colors[scheme].tint}
+                      size={22}
+                    />
+                  ) : null}
+                </Pressable>
+              );
+            })}
+          </View>
+          <ThemedText style={styles.rowSub}>
+            Uploading flat out makes browsing and video stutter. These leave room for
+            everything else — but only while the screen is on, so overnight syncs still
+            run at full speed. A sync you start by hand is limited too; pick Full speed
+            when you want it to finish now.
+          </ThemedText>
         </View>
-        <ThemedText style={styles.rowSub}>
-          Uploading flat out makes browsing and video stutter. These leave room for
-          everything else — but only while the screen is on, so overnight syncs still
-          run at full speed. A sync you start by hand is limited too; pick Full speed
-          when you want it to finish now.
-        </ThemedText>
-      </View>
 
-      <View style={styles.section}>
-        <ThemedText type="subtitle">Sync</ThemedText>
-        <Pressable
-          onPress={() => router.push('/background-sync')}
-          style={({ pressed }) => [
-            styles.navRow,
-            { borderColor: Colors[scheme].border, opacity: pressed ? 0.6 : 1 },
-          ]}
-          accessibilityLabel="Background sync setup">
-          <IconSymbol
-            name="arrow.triangle.2.circlepath"
-            color={Colors[scheme].tint}
-            size={20}
-          />
-          <View style={{ flex: 1, gap: 2 }}>
-            <ThemedText type="defaultSemiBold">Background sync</ThemedText>
-            <ThemedText style={styles.rowSub}>
-              Check device settings that can block scheduled syncs.
-            </ThemedText>
-          </View>
-          <IconSymbol name="chevron.right" color={Colors[scheme].icon} size={18} />
-        </Pressable>
-      </View>
+        <View style={styles.section}>
+          <ThemedText type="subtitle">Sync</ThemedText>
+          <Pressable
+            onPress={() => router.push('/background-sync')}
+            style={({ pressed }) => [
+              styles.navRow,
+              { borderColor: Colors[scheme].border, opacity: pressed ? 0.6 : 1 },
+            ]}
+            accessibilityLabel="Background sync setup">
+            <IconSymbol
+              name="arrow.triangle.2.circlepath"
+              color={Colors[scheme].tint}
+              size={20}
+            />
+            <View style={{ flex: 1, gap: 2 }}>
+              <ThemedText type="defaultSemiBold">Background sync</ThemedText>
+              <ThemedText style={styles.rowSub}>
+                Check device settings that can block scheduled syncs.
+              </ThemedText>
+            </View>
+            <IconSymbol name="chevron.right" color={Colors[scheme].icon} size={18} />
+          </Pressable>
+        </View>
 
-      <View style={styles.section}>
-        <ThemedText type="subtitle">Privacy</ThemedText>
-        <Pressable
-          onPress={() => router.push('/permissions')}
-          style={({ pressed }) => [
-            styles.navRow,
-            { borderColor: Colors[scheme].border, opacity: pressed ? 0.6 : 1 },
-          ]}
-          accessibilityLabel="App permissions">
-          <IconSymbol name="lock.shield" color={Colors[scheme].tint} size={20} />
-          <View style={{ flex: 1, gap: 2 }}>
-            <ThemedText type="defaultSemiBold">App permissions</ThemedText>
-            <ThemedText style={styles.rowSub}>
-              What {APP_NAME} can read, why, and what each one costs to leave off.
-            </ThemedText>
-          </View>
-          <IconSymbol name="chevron.right" color={Colors[scheme].icon} size={18} />
-        </Pressable>
-      </View>
+        <View style={styles.section}>
+          <ThemedText type="subtitle">Privacy</ThemedText>
+          <Pressable
+            onPress={() => router.push('/permissions')}
+            style={({ pressed }) => [
+              styles.navRow,
+              { borderColor: Colors[scheme].border, opacity: pressed ? 0.6 : 1 },
+            ]}
+            accessibilityLabel="App permissions">
+            <IconSymbol name="lock.shield" color={Colors[scheme].tint} size={20} />
+            <View style={{ flex: 1, gap: 2 }}>
+              <ThemedText type="defaultSemiBold">App permissions</ThemedText>
+              <ThemedText style={styles.rowSub}>
+                What {APP_NAME} can read, why, and what each one costs to leave off.
+              </ThemedText>
+            </View>
+            <IconSymbol name="chevron.right" color={Colors[scheme].icon} size={18} />
+          </Pressable>
+        </View>
 
-      <View style={styles.section}>
-        <ThemedText type="subtitle">Data</ThemedText>
-        <Pressable
-          onPress={() => router.push('/backup')}
-          style={({ pressed }) => [
-            styles.navRow,
-            { borderColor: Colors[scheme].border, opacity: pressed ? 0.6 : 1 },
-          ]}
-          accessibilityLabel="Backup and restore">
-          <IconSymbol name="arrow.up.arrow.down" color={Colors[scheme].tint} size={20} />
-          <View style={{ flex: 1, gap: 2 }}>
-            <ThemedText type="defaultSemiBold">Backup &amp; restore</ThemedText>
-            <ThemedText style={styles.rowSub}>
-              Export or import your servers and sync jobs.
-            </ThemedText>
-          </View>
-          <IconSymbol name="chevron.right" color={Colors[scheme].icon} size={18} />
-        </Pressable>
-      </View>
+        <View style={styles.section}>
+          <ThemedText type="subtitle">Data</ThemedText>
+          <Pressable
+            onPress={() => router.push('/backup')}
+            style={({ pressed }) => [
+              styles.navRow,
+              { borderColor: Colors[scheme].border, opacity: pressed ? 0.6 : 1 },
+            ]}
+            accessibilityLabel="Backup and restore">
+            <IconSymbol name="arrow.up.arrow.down" color={Colors[scheme].tint} size={20} />
+            <View style={{ flex: 1, gap: 2 }}>
+              <ThemedText type="defaultSemiBold">Backup &amp; restore</ThemedText>
+              <ThemedText style={styles.rowSub}>
+                Export or import your servers and sync jobs.
+              </ThemedText>
+            </View>
+            <IconSymbol name="chevron.right" color={Colors[scheme].icon} size={18} />
+          </Pressable>
+        </View>
+      </ScrollView>
     </ThemedView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: 16, gap: 24 },
+  container: { flex: 1 },
+  scroll: { padding: 16, gap: 24 },
   section: { gap: 10 },
   toggleRow: {
     flexDirection: 'row',

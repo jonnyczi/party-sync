@@ -87,6 +87,24 @@ declare class CopypartySyncModule extends NativeModule {
   /** Build.MANUFACTURER, lowercased (e.g. 'samsung', 'xiaomi'). */
   getManufacturer(): string;
 
+  // ---- Storage probes ----
+
+  /** Whether a persisted SAF tree grant is still usable — one row from the
+   *  tree's own document, instead of enumerating every child.
+   *
+   *  Resolves `true` / `false`, or **`null`** when the storage provider did not
+   *  answer within `timeoutMs`. `null` is deliberately not `false`: telling a
+   *  user their folder is gone when it is merely slow invites a re-pick, and a
+   *  *different* pick silently repoints the job — file_state keys on
+   *  tree-relative paths, so it would re-upload everything.
+   *
+   *  Added after the original probe set, so a binary predating it leaves the
+   *  property undefined and a JS-only reload will not pick it up. Call it as
+   *  `CopypartySync?.canReadFolder?.(uri, ms)` and fall back to the
+   *  expo-file-system enumeration when the result is `undefined`
+   *  (src/storage/saf.ts). */
+  canReadFolder(treeUri: string, timeoutMs: number): Promise<boolean | null>;
+
   // ---- Settings shortcuts ----
 
   /** System Allow/Deny dialog for the battery-optimization exemption. */

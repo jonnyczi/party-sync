@@ -1,13 +1,24 @@
 import * as WebBrowser from 'expo-web-browser';
 import { useCallback, useEffect, useState } from 'react';
-import { AppState, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import {
+  ActivityIndicator,
+  AppState,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  View,
+} from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors } from '@/constants/theme';
+import { useAsyncAction } from '@/hooks/use-async-action';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import CopypartySync from '@/modules/copyparty-sync';
+import { APP_NAME } from '@/src/app-name';
 import type { HealthFix, HealthItem, HealthStatus } from '@/src/sync/health-eval';
 import { readSyncHealth } from '@/src/sync/health';
 
@@ -19,6 +30,7 @@ import { readSyncHealth } from '@/src/sync/health';
  */
 export default function BackgroundSyncScreen() {
   const scheme = useColorScheme() ?? 'light';
+  const insets = useSafeAreaInsets();
   const [items, setItems] = useState<HealthItem[]>([]);
 
   const probe = useCallback(() => {
@@ -71,7 +83,8 @@ export default function BackgroundSyncScreen() {
 
   return (
     <ThemedView style={styles.container}>
-      <ScrollView contentContainerStyle={styles.scroll}>
+      <ScrollView
+        contentContainerStyle={[styles.scroll, { paddingBottom: insets.bottom + 16 }]}>
         <ThemedText style={styles.blurb}>
           Android limits what apps may do in the background. These device
           settings decide whether scheduled syncs run reliably while the app is
@@ -96,6 +109,18 @@ function HealthRow({
   onFix: (item: HealthItem) => void;
 }) {
   const c = Colors[scheme];
+  // Every fix here leaves the app for a system screen or a browser tab, and
+  // cold-starting those takes long enough that an unchanged button reads as a
+  // dead one. Per-row so a pending fix survives the AppState re-probe that
+  // rebuilds `items` underneath it.
+  const fix = useAsyncAction(() => onFix(item), {
+    handsOff: true,
+    errorTitle: 'Could not open that screen',
+    errorBody:
+      `This device did not open it. You can get there from Android Settings → Apps → ` +
+      `${APP_NAME}.`,
+  });
+
   return (
     <View style={[styles.row, { borderColor: c.border }]}>
       <IconSymbol
@@ -108,14 +133,17 @@ function HealthRow({
         <ThemedText style={styles.detail}>{item.detail}</ThemedText>
         {item.fix ? (
           <Pressable
-            onPress={() => onFix(item)}
+            onPress={fix.run}
+            disabled={fix.pending}
             accessibilityLabel={`Fix ${item.title}`}
+            accessibilityState={{ disabled: fix.pending, busy: fix.pending }}
             style={({ pressed }) => [
               styles.fixButton,
-              { borderColor: c.tint, opacity: pressed ? 0.6 : 1 },
+              { borderColor: c.tint, opacity: fix.pending ? 0.5 : pressed ? 0.6 : 1 },
             ]}>
+            {fix.pending ? <ActivityIndicator size="small" color={c.tint} /> : null}
             <ThemedText style={[styles.fixLabel, { color: c.tint }]}>
-              {fixLabel(item.fix)}
+              {fix.pending ? 'Opening…' : fixLabel(item.fix)}
             </ThemedText>
           </Pressable>
         ) : null}
@@ -177,6 +205,9 @@ const styles = StyleSheet.create({
   detail: { opacity: 0.7, fontSize: 13, lineHeight: 18 },
   fixButton: {
     alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
     borderWidth: 1,
     borderRadius: 8,
     paddingHorizontal: 12,

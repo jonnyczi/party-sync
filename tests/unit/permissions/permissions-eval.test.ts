@@ -21,7 +21,7 @@ const folder = (over: Partial<SafFolderProbe> = {}): SafFolderProbe => ({
   name: 'Camera backup',
   folderLabel: 'DCIM',
   unset: false,
-  accessible: true,
+  access: 'ok',
   ...over,
 });
 
@@ -156,7 +156,7 @@ describe('evaluateAppPermissions', () => {
     it('blocks a row whose grant is gone and points its action at that job', () => {
       const item = itemById({
         ...granted,
-        safFolders: [folder({ accessible: false })],
+        safFolders: [folder({ access: 'lost' })],
       }).get('saf:7')!;
       expect(item.status).toBe('blocked');
       expect(item.action).toBe('repick_folder');
@@ -165,7 +165,7 @@ describe('evaluateAppPermissions', () => {
 
     it('distinguishes a folder that was never picked from one whose grant was lost', () => {
       const never = itemById({ ...granted, safFolders: [folder({ unset: true })] }).get('saf:7')!;
-      const lost = itemById({ ...granted, safFolders: [folder({ accessible: false })] }).get(
+      const lost = itemById({ ...granted, safFolders: [folder({ access: 'lost' })] }).get(
         'saf:7',
       )!;
       expect(never.status).toBe('blocked');
@@ -177,7 +177,7 @@ describe('evaluateAppPermissions', () => {
     it('names the folder in a lost-grant row so the user knows which one to re-pick', () => {
       const item = itemById({
         ...granted,
-        safFolders: [folder({ accessible: false, folderLabel: 'Pictures' })],
+        safFolders: [folder({ access: 'lost', folderLabel: 'Pictures' })],
       }).get('saf:7')!;
       expect(item.detail).toContain('Pictures');
     });
@@ -193,9 +193,73 @@ describe('evaluateAppPermissions', () => {
     it('labels every folder row required', () => {
       const items = evaluateAppPermissions({
         ...granted,
-        safFolders: [folder({ jobId: 1 }), folder({ jobId: 2, accessible: false })],
+        safFolders: [folder({ jobId: 1 }), folder({ jobId: 2, access: 'lost' })],
       }).filter((i) => i.section === 'folders');
       expect(items.every((i) => i.level === 'required')).toBe(true);
+    });
+  });
+
+  describe('folder access — still checking', () => {
+    it('emits a full row so the section renders before the probe lands', () => {
+      const item = itemById({ ...granted, safFolders: [folder({ access: 'checking' })] }).get(
+        'saf:7',
+      )!;
+      expect(item.status).toBe('checking');
+      expect(item.section).toBe('folders');
+      expect(item.level).toBe('required');
+    });
+
+    it('names the folder so the row is identifiable before it settles', () => {
+      const item = itemById({
+        ...granted,
+        safFolders: [folder({ access: 'checking', folderLabel: 'Pictures' })],
+      }).get('saf:7')!;
+      expect(item.detail).toContain('Pictures');
+    });
+
+    it('offers no action — a spinner must not invite a re-pick', () => {
+      const item = itemById({ ...granted, safFolders: [folder({ access: 'checking' })] }).get(
+        'saf:7',
+      )!;
+      expect(item.action).toBeUndefined();
+    });
+
+    it('lets "never picked" win over "still checking"', () => {
+      const item = itemById({
+        ...granted,
+        safFolders: [folder({ unset: true, access: 'checking' })],
+      }).get('saf:7')!;
+      expect(item.status).toBe('blocked');
+      expect(item.detail).toContain('No folder picked yet');
+    });
+  });
+
+  describe('folder access — could not be checked', () => {
+    it('warns rather than blocks when the probe gave up', () => {
+      const item = itemById({ ...granted, safFolders: [folder({ access: 'unknown' })] }).get(
+        'saf:7',
+      )!;
+      expect(item.status).toBe('warn');
+    });
+
+    it('never accuses the grant of being gone', () => {
+      const unknown = itemById({ ...granted, safFolders: [folder({ access: 'unknown' })] }).get(
+        'saf:7',
+      )!;
+      const lost = itemById({ ...granted, safFolders: [folder({ access: 'lost' })] }).get(
+        'saf:7',
+      )!;
+      expect(lost.detail).toContain('no longer readable');
+      expect(unknown.detail).not.toContain('no longer readable');
+      expect(unknown.detail).toContain('could not be checked');
+    });
+
+    it('still offers a re-pick as an escape hatch', () => {
+      const item = itemById({ ...granted, safFolders: [folder({ access: 'unknown' })] }).get(
+        'saf:7',
+      )!;
+      expect(item.action).toBe('repick_folder');
+      expect(item.jobId).toBe(7);
     });
   });
 
@@ -210,7 +274,14 @@ describe('evaluateAppPermissions', () => {
               originalBytes,
               notificationsEnabled,
               hasMediaJob,
-              safFolders: [folder({ jobId: 1 }), folder({ jobId: 2, accessible: false })],
+              // Every SafAccess value, so an invariant cannot hold by only ever
+              // seeing settled folders.
+              safFolders: [
+                folder({ jobId: 1, access: 'ok' }),
+                folder({ jobId: 2, access: 'lost' }),
+                folder({ jobId: 3, access: 'checking' }),
+                folder({ jobId: 4, access: 'unknown' }),
+              ],
             });
 
     it('never marks an optional row blocked', () => {
@@ -235,10 +306,17 @@ describe('evaluateAppPermissions', () => {
           }
     });
 
-    it('gives every not-ok row an action to take', () => {
+    it('gives every settled not-ok row an action to take', () => {
       for (const p of matrix)
         for (const item of evaluateAppPermissions(p))
-          if (item.status !== 'ok') expect(item.action, `${item.id}`).toBeTruthy();
+          if (item.status !== 'ok' && item.status !== 'checking')
+            expect(item.action, `${item.id}`).toBeTruthy();
+    });
+
+    it('never offers an action on a row it is still checking', () => {
+      for (const p of matrix)
+        for (const item of evaluateAppPermissions(p))
+          if (item.status === 'checking') expect(item.action, `${item.id}`).toBeUndefined();
     });
   });
 
@@ -248,7 +326,7 @@ describe('evaluateAppPermissions', () => {
       originalBytes: 'needs_permission',
       notificationsEnabled: false,
       hasMediaJob: true,
-      safFolders: [folder({ jobId: 1 }), folder({ jobId: 2, accessible: false })],
+      safFolders: [folder({ jobId: 1 }), folder({ jobId: 2, access: 'lost' })],
     });
     expect(items.filter((i) => i.status === 'blocked')).toHaveLength(2);
     expect(items.filter((i) => i.status === 'warn')).toHaveLength(2);

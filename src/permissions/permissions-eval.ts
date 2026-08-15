@@ -7,7 +7,12 @@
 
 import type { MediaReadState, OriginalBytesState } from '../media/media-permission';
 
-export type PermissionStatus = 'ok' | 'warn' | 'blocked';
+/**
+ * 'checking' is only ever a folder row: the SAF tree probe is the one input
+ * that cannot be answered in milliseconds, so the screen renders everything
+ * else first and lets those rows settle underneath (src/permissions/permissions.ts).
+ */
+export type PermissionStatus = 'ok' | 'warn' | 'blocked' | 'checking';
 
 /**
  * Surfaced next to the status so a coloured row is never ambiguous.
@@ -37,6 +42,18 @@ export type PermissionItemId =
   | 'notifications'
   | `saf:${number}`;
 
+/**
+ * Outcome of one job's SAF tree probe.
+ *
+ * - 'checking' — the probe has not answered yet; the screen paints first.
+ * - 'ok' / 'lost' — the probe answered.
+ * - 'unknown' — the probe gave up waiting. Deliberately distinct from 'lost':
+ *   a folder that is merely slow is not a folder that is gone, and saying so
+ *   invites a re-pick — a *different* pick silently repoints the job, and
+ *   file_state keys on tree-relative paths, so it would re-upload everything.
+ */
+export type SafAccess = 'checking' | 'ok' | 'lost' | 'unknown';
+
 export interface SafFolderProbe {
   jobId: number;
   /** jobs.name */
@@ -45,8 +62,8 @@ export interface SafFolderProbe {
   folderLabel: string;
   /** jobs.source_uri === '' — never picked, as opposed to picked and then lost. */
   unset: boolean;
-  /** Reading the tree URI succeeded. Meaningless when `unset`. */
-  accessible: boolean;
+  /** Whether the tree grant is still usable. Meaningless when `unset`. */
+  access: SafAccess;
 }
 
 export interface PermissionProbeState {
@@ -253,9 +270,30 @@ function folderItem(f: SafFolderProbe): PermissionItem {
     };
   }
 
-  return f.accessible
-    ? { ...base, status: 'ok', detail: `${f.folderLabel} — still readable.` }
-    : {
+  switch (f.access) {
+    case 'checking':
+      // No action while it is still being checked: offering "Re-pick folder"
+      // under a spinner invites a pick the user did not need to make.
+      return { ...base, status: 'checking', detail: `${f.folderLabel} — checking…` };
+
+    case 'ok':
+      return { ...base, status: 'ok', detail: `${f.folderLabel} — still readable.` };
+
+    case 'unknown':
+      return {
+        ...base,
+        // 'warn', not 'blocked': the check gave up, which is not the same as an
+        // answer. Say what is actually known and nothing more.
+        status: 'warn',
+        detail:
+          `${f.folderLabel} did not answer in time, so this could not be checked. That ` +
+          'usually means its storage — an SD card, or a cloud provider — is disconnected ' +
+          'or asleep, rather than that the folder is gone.',
+        action: 'repick_folder',
+      };
+
+    case 'lost':
+      return {
         ...base,
         status: 'blocked',
         // Name the folder: re-picking a *different* one silently repoints the
@@ -266,4 +304,5 @@ function folderItem(f: SafFolderProbe): PermissionItem {
           'gone — the folder was moved, renamed or deleted, or Android dropped the grant.',
         action: 'repick_folder',
       };
+  }
 }

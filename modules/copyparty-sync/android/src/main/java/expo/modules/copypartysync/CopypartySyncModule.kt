@@ -1,6 +1,7 @@
 package expo.modules.copypartysync
 
 import android.content.Context
+import android.os.CancellationSignal
 import android.util.Log
 import androidx.core.app.NotificationManagerCompat
 import com.facebook.react.bridge.Arguments
@@ -11,8 +12,12 @@ import com.facebook.react.jstasks.HeadlessJsTaskContext
 import expo.modules.interfaces.taskManager.TaskManagerInterface
 import expo.modules.kotlin.Promise
 import expo.modules.kotlin.exception.CodedException
+import expo.modules.kotlin.functions.Coroutine
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * Android background-sync support: a real dataSync foreground service (+
@@ -167,6 +172,33 @@ class CopypartySyncModule : Module() {
 
     Function("getManufacturer") {
       DeviceProbes.getManufacturer()
+    }
+
+    // ---- Storage probes (see src/storage/saf.ts) ----
+
+    /**
+     * Whether a persisted SAF tree grant is still usable, in one row query
+     * instead of enumerating the folder. Resolves null when the storage
+     * provider did not answer in time — see the TS declaration for why null is
+     * not false.
+     */
+    AsyncFunction("canReadFolder") Coroutine { treeUri: String, timeoutMs: Int ->
+      val ctx = context
+      val signal = CancellationSignal()
+      withTimeoutOrNull(timeoutMs.toLong()) {
+        withContext(Dispatchers.IO) { SafProbes.canReadFolder(ctx, treeUri, signal) }
+      } ?: run {
+        // Cancellation is cooperative only: ExternalStorageProvider does
+        // filesystem work and never polls the signal, so a wedged volume keeps
+        // one Dispatchers.IO thread blocked until the kernel returns. That is
+        // exactly why the blocking call is on Dispatchers.IO and not run
+        // directly on the modules queue — withTimeoutOrNull suspends this
+        // coroutine and frees the queue, and the IO pool is elastic, so a
+        // stranded thread cannot stall the module's other calls. Not a leak; do
+        // not "fix" it by dropping the timeout.
+        signal.cancel()
+        null
+      }
     }
 
     // ---- Settings shortcuts (the checklist's Fix buttons) ----
