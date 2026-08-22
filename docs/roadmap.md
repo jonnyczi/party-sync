@@ -55,7 +55,7 @@ in CI) and the recipe is drafted at
 What's left:
 
 1. **Push the public mirror + a release tag.** F-Droid builds from the public
-   GitHub repo `github.com/jonnyczi/copyparty-client`; the recipe pins
+   GitHub repo `github.com/jonnyczi/party-sync`; the recipe pins
    `commit: v1.0.0`. So a `vX.Y.Z` tag (matching `app.json`) must exist there.
    See `release-pipeline.md` → Versioning (`npm run bump-version`, then tag).
 2. **Validate locally before the MR.** Install `fdroidserver` and run
@@ -102,14 +102,17 @@ Then the implementation:
 
 ## 4. Canonical mirror is behind 🟡 (housekeeping)
 
-The remotes were renamed since this was written, and the names here were backwards
-— following the old instruction would have pushed the wrong way. As of now:
-`origin` is **GitHub** (`github.com/jonnyczi/copyparty-client`), which `master`
-tracks and where CI and PRs live; `selfhosted` is `dev.jonnyczi-systems.com`.
+The project moved to a new GitHub repo and the history was rewritten, so the
+remote layout has changed again. As of now: `origin` is
+**`github.com/jonnyczi/party-sync`**, tracked by **`main`** (renamed from
+`master`), where CI, releases and the signing secrets live. `copyparty-client`
+is the previous GitHub repo, and `selfhosted` is `dev.jonnyczi-systems.com`.
 
-GitHub is **ahead** of the self-hosted repo, and they have not diverged, so it's a
-fast-forward. When desired: `git push selfhosted master --tags`. (Left undone
-deliberately — pushing to the self-hosted remote wasn't part of the merge request.)
+Both secondary remotes still hold the **pre-rewrite** history. Every commit was
+re-dated during the migration, so their histories have genuinely **diverged**
+from `main` — pushing to either now requires `--force`, not a fast-forward, and
+would rewrite whatever is published there. Left undone deliberately;
+`copyparty-client` keeps serving the v0.1.0–v0.10.0 release downloads.
 
 ---
 

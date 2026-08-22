@@ -3,7 +3,7 @@
 # own key.
 #
 # PREREQUISITE: the source must be pushed to the public mirror below
-# (github.com/jonnyczi/copyparty-client) and the v0.1.0 tag must exist there.
+# (github.com/jonnyczi/party-sync) and the v0.1.0 tag must exist there.
 #
 # Expo/React Native on F-Droid's Debian buildserver is fiddly — validate locally
 # with `fdroid build io.github.jonnyczi.copypartyclient` (fdroidserver) and
@@ -17,11 +17,11 @@ Name: Party Sync — copyparty backup
 Summary: Back up your phone to your own copyparty server
 License: MIT
 AuthorName: jonnyczi
-SourceCode: https://github.com/jonnyczi/copyparty-client
-IssueTracker: https://github.com/jonnyczi/copyparty-client/issues
+SourceCode: https://github.com/jonnyczi/party-sync
+IssueTracker: https://github.com/jonnyczi/party-sync/issues
 
 RepoType: git
-Repo: https://github.com/jonnyczi/copyparty-client.git
+Repo: https://github.com/jonnyczi/party-sync.git
 
 Builds:
   - versionName: 0.1.0

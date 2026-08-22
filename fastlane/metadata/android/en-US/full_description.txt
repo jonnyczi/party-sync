@@ -31,4 +31,4 @@ Features
 Requires a copyparty server (github.com/9001/copyparty). Party Sync is an
 independent client and is not affiliated with the copyparty project.
 
-Free software, MIT licensed. Source: github.com/jonnyczi/copyparty-client
+Free software, MIT licensed. Source: github.com/jonnyczi/party-sync

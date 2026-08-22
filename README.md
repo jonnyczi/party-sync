@@ -13,7 +13,7 @@ LAN or anywhere else. No cloud, no Google services.
 
 Party Sync is an independent client and is not affiliated with the copyparty project.
 
-[![Get it on GitHub Releases](https://img.shields.io/badge/get_it_on-GitHub_Releases-2da44e?logo=github)](https://github.com/jonnyczi/copyparty-client/releases/latest)
+[![Get it on GitHub Releases](https://img.shields.io/badge/get_it_on-GitHub_Releases-2da44e?logo=github)](https://github.com/jonnyczi/party-sync/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
 <p align="center">
@@ -97,7 +97,7 @@ hashing time, not bandwidth.
 
 ## Install
 
-Download the APK from the [latest release](https://github.com/jonnyczi/copyparty-client/releases/latest),
+Download the APK from the [latest release](https://github.com/jonnyczi/party-sync/releases/latest),
 verify it against the release's `SHA256SUMS`, and sideload it.
 
 F-Droid and Google Play submissions are planned — see [docs/roadmap.md](docs/roadmap.md).

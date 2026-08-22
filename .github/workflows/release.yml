@@ -105,23 +105,28 @@ jobs:
             --keystore-password=env:STORE_PW \
             --key-alias=env:KEY_ALIAS \
             --key-password=env:KEY_PW \
-            export --path ./out/copyparty-${{ github.ref_name }}.apk
+            export --path ./out/party-sync-${{ github.ref_name }}.apk
           dagger call build-aab \
             --nix-cache=./nixcache \
             --keystore="file:$RUNNER_TEMP/upload.keystore" \
             --keystore-password=env:STORE_PW \
             --key-alias=env:KEY_ALIAS \
             --key-password=env:KEY_PW \
-            export --path ./out/copyparty-${{ github.ref_name }}.aab
+            export --path ./out/party-sync-${{ github.ref_name }}.aab
+
+      # Gate the bytes we actually publish — ci.yml only scans an unsigned PR
+      # build, which would miss anything that appears under release signing/R8.
+      - name: Scan for non-free dependencies
+        run: python3 scripts/scan-nonfree-apk.py ./out/party-sync-${{ github.ref_name }}.apk
 
       - name: Checksums
         working-directory: ./out
-        run: sha256sum copyparty-*.apk copyparty-*.aab > SHA256SUMS
+        run: sha256sum party-sync-*.apk party-sync-*.aab > SHA256SUMS
 
       # Build the release notes from the git history — every commit since the
       # previous tag, grouped by type (see cliff.toml). GitHub's built-in
       # generate_release_notes lists only merged PRs, which would omit the many
-      # commits pushed straight to master.
+      # commits pushed straight to main.
       - name: Generate release notes (git-cliff)
         run: npx --yes git-cliff --latest --strip all -o "$RUNNER_TEMP/RELEASE_NOTES.md"
 
@@ -130,6 +135,6 @@ jobs:
         with:
           body_path: ${{ runner.temp }}/RELEASE_NOTES.md
           files: |
-            out/copyparty-${{ github.ref_name }}.apk
-            out/copyparty-${{ github.ref_name }}.aab
+            out/party-sync-${{ github.ref_name }}.apk
+            out/party-sync-${{ github.ref_name }}.aab
             out/SHA256SUMS

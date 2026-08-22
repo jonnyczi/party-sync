@@ -5,7 +5,7 @@ name: CI
 on:
   pull_request:
   push:
-    branches: [master]
+    branches: [main]
   workflow_dispatch: # manually run the heavy build job on demand
 
 # Pin the Dagger engine version to dagger.json's engineVersion.
@@ -39,7 +39,7 @@ jobs:
 
   # Full release-APK build via the nixos/nix container. Heavy and slow on
   # GitHub-hosted runners (cold nix store + Android SDK/NDK), so it only runs on
-  # PRs and manual dispatch — not on every master push. Tags build the real
+  # PRs and manual dispatch — not on every main push. Tags build the real
   # signed artifact via release.yml.
   build:
     if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'

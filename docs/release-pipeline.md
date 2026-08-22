@@ -93,11 +93,11 @@ git commit -am "release vX.Y.Z" && git tag vX.Y.Z && git push --tags
 - **F-Droid** — builds from source on F-Droid's own buildserver (not Dagger/Nix)
   and signs with its own key. Recipe drafted at
   `metadata/io.github.jonnyczi.copypartyclient.yml`; submit a copy as an MR to
-  the `fdroiddata` repo. The non-free-deps CI gate (`scripts/scan-nonfree-apk.py`,
-  run in `ci.yml`) guards the de-Googling that makes this possible.
+  the `fdroiddata` repo. The non-free-deps gate (`scripts/scan-nonfree-apk.py`, run in
+  `ci.yml` on PRs and again in `release.yml` before publishing) guards the de-Googling that makes this possible.
 
   License is **MIT** (`LICENSE` at repo root). The recipe builds from the public
-  mirror **github.com/jonnyczi/copyparty-client**.
+  mirror **github.com/jonnyczi/party-sync**.
 
   **Prerequisite before submitting:** push the source + the `vX.Y.Z` tag to that
   public GitHub mirror (the canonical self-hosted repo is
