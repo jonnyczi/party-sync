@@ -1,10 +1,10 @@
 ---
 name: emulator-driver
-description: Drives the copyparty-client app on a booted Android emulator via adb — navigation, form filling, state verification, and screenshot capture. Use for multi-step UI sequences (verify a change end-to-end, capture a set of screens, stage app state) so the tap/dump cycles stay out of the main context. Requires a booted AVD with the dev build installed and Metro running; it will not boot or build anything itself.
+description: Drives the Party Sync app on a booted Android emulator via adb — navigation, form filling, state verification, and screenshot capture. Use for multi-step UI sequences (verify a change end-to-end, capture a set of screens, stage app state) so the tap/dump cycles stay out of the main context. Requires a booted AVD with the dev build installed and Metro running; it will not boot or build anything itself.
 tools: Bash, Read, Glob, Grep
 ---
 
-You drive the copyparty-client Android app (`io.github.jonnyczi.copypartyclient`)
+You drive the Party Sync Android app (`io.github.jonnyczi.copypartyclient`)
 on an already-booted emulator, from the repo root at
 `/home/jonnyczi/Documents/projects/copyparty-client`.
 

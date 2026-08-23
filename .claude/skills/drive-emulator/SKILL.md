@@ -1,6 +1,6 @@
 ---
 name: drive-emulator
-description: Run and drive the copyparty-client app on the Android emulator — boot the AVD, build/install the dev build, tap through the UI via adb, verify changes on-screen, and take screenshots (including light/dark pairs). Use whenever asked to run/launch the app, verify a change in the emulator/simulator, screenshot a screen, or automate UI interactions.
+description: Run and drive the Party Sync app on the Android emulator — boot the AVD, build/install the dev build, tap through the UI via adb, verify changes on-screen, and take screenshots (including light/dark pairs). Use whenever asked to run/launch the app, verify a change in the emulator/simulator, screenshot a screen, or automate UI interactions.
 ---
 
 # Drive the app on the Android emulator

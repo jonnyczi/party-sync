@@ -1,5 +1,5 @@
 {
-  "name": "copyparty-client",
+  "name": "party-sync",
   "main": "index.ts",
   "version": "0.10.0",
   "license": "MIT",

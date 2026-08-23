@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "Party Sync",
-    "slug": "copyparty-client",
+    "slug": "party-sync",
     "version": "0.10.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",

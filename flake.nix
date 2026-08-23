@@ -1,5 +1,5 @@
 {
-  description = "copyparty-client Expo + Android dev environment";
+  description = "party-sync Expo + Android dev environment";
 
   inputs.nixpkgs.url = "github:nixos/nixpkgs/nixos-25.11";
 

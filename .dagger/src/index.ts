@@ -1,5 +1,5 @@
 /**
- * Dagger module for reproducible copyparty-client Android release builds.
+ * Dagger module for reproducible party-sync Android release builds.
  *
  * The release build runs inside a `nixos/nix` container, so flake.nix stays the
  * single source of truth for the toolchain (JDK, Android SDK/NDK, gradle, node).
