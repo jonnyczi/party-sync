@@ -1,0 +1,4 @@
+Maintenance release — no user-facing changes.
+
+- The project has moved to a new home; release builds now come from there
+- Published builds are scanned for non-free dependencies before release
