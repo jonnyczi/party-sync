@@ -1,6 +1,9 @@
 # F-Droid metadata recipe — submit a copy to the fdroiddata repo as a merge
-# request; F-Droid builds from source on its own buildserver and signs with its
-# own key.
+# request. F-Droid builds from source on its own buildserver, then (via the
+# Binaries: field below) compares that build against the APK we publish on
+# GitHub and ships OUR signed binary instead of re-signing with its own key, so
+# an F-Droid install stays cross-updatable with the GitHub one. That requires
+# bit-for-bit reproducibility — see roadmap §2a, which is NOT proven yet.
 #
 # PREREQUISITE (blocking): github.com/jonnyczi/party-sync is currently PRIVATE.
 # F-Droid clones anonymously, so the repo must be made public before this recipe
@@ -51,8 +54,20 @@ Builds:
     gradle:
       - yes
     # No signing block: our release signingConfig (plugins/withReleaseSigning.js)
-    # falls back to debug signing when COPYPARTY_UPLOAD_* are unset, and F-Droid
-    # strips and re-signs with its own key regardless.
+    # falls back to debug signing when COPYPARTY_UPLOAD_* are unset. F-Droid
+    # discards whatever signature this build produces — it only compares the
+    # unsigned contents against the published binary below.
+
+# Publish OUR signed APK rather than an F-Droid-signed one, so GitHub and
+# F-Droid installs are cross-updatable. F-Droid downloads this URL, verifies it
+# reproduces from the build above, and republishes it unchanged.
+# %v expands to versionName, matching our release asset naming.
+Binaries: https://github.com/jonnyczi/party-sync/releases/download/v%v/party-sync-v%v.apk
+
+# Pins the signer F-Droid will accept: the cert verified on v0.11.0,
+# CN=jonnyczi, O=copyparty-client. Its keystore password is unrecoverable, so
+# this can never be rotated — see roadmap §4.
+AllowedAPKSigningKeys: f687d5f0de1f584476a604663609c9b4df45bae74c9c846e15082740092eb77f
 
 AutoUpdateMode: Version v%v
 UpdateCheckMode: Tags

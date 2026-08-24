@@ -84,21 +84,71 @@ What's left, in order:
 
    The recipe already overrides `gradle.properties` to ship ARM-only, matching
    the GitHub/Play artifacts.
-4. **Submit** the recipe as a merge request to `gitlab.com/fdroid/fdroiddata`;
-   F-Droid compiles, signs and publishes.
+4. **Prove the build is reproducible** — required by the `Binaries:` decision in
+   §2a, and the largest unknown here. Start by pinning `NIX_IMAGE`
+   (`.dagger/src/index.ts:44`) to a digest, then build one tag twice and
+   `diffoscope` the results.
+5. **Submit** the recipe as a merge request to `gitlab.com/fdroid/fdroiddata`.
 
-**Decide before submitting: F-Droid's own key, or ours?** As the recipe stands,
-F-Droid strips our signature and re-signs with **its** key, so an F-Droid install
-is *not* cross-updatable with the GitHub build — switching sources means
-uninstall + reinstall, which loses `file_state` and forces a full re-upload.
+### 2a. Signing: ship our own binary via `Binaries:` (decided 2026-08-24)
 
-F-Droid's `Binaries:` field avoids that: they build from source, verify the
-output matches the APK we published, then ship **our** signed binary, so the
-signature matches GitHub's. It requires bit-for-bit reproducibility — and the
-Dagger + Nix pipeline is an unusually strong starting point (v0.11.0's APK came
-out at exactly the same byte size as the local v0.10.0 build). The cost is real
-upfront work, plus it makes the signing key permanently load-bearing: see
-§4 on the fact that its password is unrecoverable.
+**Decision: F-Droid publishes *our* signed APK, not one signed with F-Droid's
+key.** The default behaviour — F-Droid stripping our signature and re-signing —
+would make an F-Droid install *not* cross-updatable with the GitHub build:
+switching sources would mean uninstall + reinstall, losing `file_state` and
+forcing a full re-upload. `Binaries:` avoids that. F-Droid builds from source,
+compares its output against the APK we published, and on a match ships our
+binary, so both channels carry the same signature.
+
+Recipe changes this implies (already applied):
+
+```yaml
+Binaries: https://github.com/jonnyczi/party-sync/releases/download/v%v/party-sync-v%v.apk
+AllowedAPKSigningKeys: f687d5f0de1f584476a604663609c9b4df45bae74c9c846e15082740092eb77f
+```
+
+The `%v` template matches our published asset naming (`party-sync-vX.Y.Z.apk`),
+and the key is the cert verified on v0.11.0 (`CN=jonnyczi, O=copyparty-client`).
+The old "F-Droid strips and re-signs with its own key regardless" comment in the
+recipe no longer applies and has been removed.
+
+**What's already in our favour:**
+
+- **ABIs match.** `scripts/ci-android-build.sh:29` pins
+  `armeabi-v7a,arm64-v8a`, the same pair the recipe writes into
+  `gradle.properties`. A mismatch here would make byte-equality impossible.
+- **The toolchain is fully pinned** by `flake.nix` + the committed `flake.lock`
+  (nixpkgs `c7f47036…`): JDK 17, build-tools 35.0.0/36.0.0, NDK
+  27.1.12297006, CMake 3.22.1.
+- **The release build already runs inside `nix develop`** in a container, so it
+  does not depend on host state.
+
+**What has to be fixed or proven:**
+
+1. **Pin the base image.** `.dagger/src/index.ts:44` is
+   `NIX_IMAGE = "nixos/nix:latest"` — a mutable tag, with a TODO already sitting
+   next to it. Until it is pinned to a digest, "reproducible" means nothing.
+2. **F-Droid builds on Debian, not our Nix container.** Their stock toolchain
+   will not coincidentally produce our bytes. The tractable path is to have the
+   recipe install Nix and build through the same committed `flake.lock` (reusing
+   `scripts/ci-android-build.sh`), so F-Droid runs *our* build rather than a
+   lookalike. Expect reviewer scrutiny — it is a large download and wants
+   network during the build — and be ready for it to be refused, in which case
+   the fallback is matching Debian's toolchain to the flake by hand.
+3. **The usual RN/Android reproducibility hazards**: Metro bundle determinism,
+   zip entry ordering and timestamps, and any build path or timestamp baked into
+   the native `.so` files or `BuildConfig`.
+
+**How to prove it before submitting:** build the same tag twice and compare —
+`dagger call build-apk` twice, then `diffoscope` the two APKs. Only once that is
+clean is it worth testing against the published artifact. Note the earlier
+observation that v0.11.0's APK matched v0.10.0's byte *size* is weak evidence at
+best; equal size is not equal bytes.
+
+**Ongoing cost, accepted:** verification runs per release, so a toolchain drift
+silently stops F-Droid publishing new versions until it is chased down. And
+because the signing key's password is unrecoverable (§4), we can never re-sign
+or rotate — this signature is now permanent.
 
 ---
 
