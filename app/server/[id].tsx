@@ -285,7 +285,7 @@ export default function ServerEditScreen() {
             </View>
           </Field>
 
-          <Field label="Pin certificate SHA-256 (optional, for self-signed)">
+          <Field label="Certificate SHA-256 (optional, not enforced yet)">
             <TextInput
               value={certSha}
               onChangeText={setCertSha}
@@ -300,6 +300,12 @@ export default function ServerEditScreen() {
                 Fingerprint must be 64 hex characters (colons and spaces ok).
               </ThemedText>
             ) : null}
+            {/* Stored but never checked — see docs/roadmap.md §5. Until pinning is
+                wired, don't let the field imply it makes self-signed HTTPS work. */}
+            <ThemedText style={styles.hint}>
+              Saved for future certificate pinning but not checked yet. Self-signed HTTPS
+              servers can&apos;t connect for now.
+            </ThemedText>
           </Field>
 
           <Pressable
@@ -380,6 +386,7 @@ const styles = StyleSheet.create({
   passwordInput: { flex: 1 },
   revealBtn: { paddingHorizontal: 8, paddingVertical: 8 },
   errorText: { fontSize: 12 },
+  hint: { opacity: 0.7, fontSize: 13 },
   testBtn: {
     marginTop: 8,
     padding: 14,

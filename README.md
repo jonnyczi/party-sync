@@ -33,7 +33,7 @@ Party Sync is an independent client and is not affiliated with the copyparty pro
 - **Date-organized uploads** — bucket photos into `2026/07/`-style folders by modification date
 - **Notifications without Google** — per-job success/failure notifications built on plain AndroidX, no Firebase/GMS
 - **Backup & restore** — export servers and jobs to an optionally encrypted file and import them on another device
-- **Plain `http://` and self-signed TLS** — LAN servers without certificates work out of the box; pin a certificate SHA-256 for self-signed HTTPS
+- **Plain `http://` or trusted HTTPS** — LAN servers without certificates work out of the box, as does HTTPS with a publicly trusted certificate (e.g. Let's Encrypt); self-signed certificates and user-installed CAs aren't supported yet
 
 ## Permissions
 
@@ -119,7 +119,7 @@ You need a copyparty server reachable from your phone —
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/quickstart-2-add-server-dark.webp">
-  <img src="docs/screenshots/quickstart-2-add-server-light.webp" width="260" alt="New server form with name, base URL, username, password, optional pinned certificate, and a successful test-connection result">
+  <img src="docs/screenshots/quickstart-2-add-server-light.webp" width="260" alt="New server form with name, base URL, username, password, optional certificate fingerprint, and a successful test-connection result">
 </picture>
 
 **3. Create a sync job** — pick a local folder or your camera roll, choose the

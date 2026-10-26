@@ -25,8 +25,9 @@ Features
   on plain AndroidX.
 * Backup and restore — export servers and jobs to an optionally encrypted file
   and import them on another device.
-* Plain http:// and self-signed TLS — LAN servers without certificates work out
-  of the box; pin a certificate SHA-256 for self-signed HTTPS.
+* Plain http:// or trusted HTTPS — LAN servers without certificates work out of
+  the box, as does HTTPS with a certificate Android already trusts. Self-signed
+  certificates aren't supported yet.
 
 Requires a copyparty server (github.com/9001/copyparty). Party Sync is an
 independent client and is not affiliated with the copyparty project.
