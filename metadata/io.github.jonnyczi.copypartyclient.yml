@@ -5,9 +5,8 @@
 # an F-Droid install stays cross-updatable with the GitHub one. That requires
 # bit-for-bit reproducibility — see roadmap §2a, which is NOT proven yet.
 #
-# PREREQUISITE (blocking): github.com/jonnyczi/party-sync is currently PRIVATE.
-# F-Droid clones anonymously, so the repo must be made public before this recipe
-# can build. The v0.11.0 tag it pins already exists there.
+# github.com/jonnyczi/party-sync is public, so F-Droid's anonymous clone works;
+# the v0.11.0 tag this recipe pins exists there.
 #
 # Expo/React Native on F-Droid's Debian buildserver is fiddly — validate locally
 # with `fdroid build io.github.jonnyczi.copypartyclient` (fdroidserver) and

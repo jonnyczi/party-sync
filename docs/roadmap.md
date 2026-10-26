@@ -47,7 +47,7 @@ it, and retry a sync against an `http://` server (the dockerized copyparty at
 
 ---
 
-## 2. F-Droid submission 🟡 (recipe ready, blocked on the repo being private)
+## 2. F-Droid submission 🟡 (recipe ready; screenshots, local build and reproducibility proof left)
 
 The de-Googling is done (zero Firebase/GMS — `scripts/scan-nonfree-apk.py` gates
 both `ci.yml` and, since v0.11.0, the **signed** artifact in `release.yml`), and
@@ -55,22 +55,21 @@ the recipe at
 [`metadata/io.github.jonnyczi.copypartyclient.yml`](../metadata/io.github.jonnyczi.copypartyclient.yml)
 is pinned at the current release (`0.11.0` / `versionCode 13` / `commit: v0.11.0`).
 
-**The one hard blocker: `github.com/jonnyczi/party-sync` is PRIVATE.** F-Droid
-clones anonymously, so nothing below can proceed until it is public. (Going
-public also stops Actions minutes being billed and unlocks branch protection.)
+**The repo is public** (confirmed 2026-10-26 via `gh repo view`), so F-Droid's
+anonymous clone works — the former hard blocker is gone. Note this is no longer
+a "mirror": party-sync is `origin`, and the `v0.11.0` tag the recipe pins exists
+there.
 
 What's left, in order:
 
-1. **Make the repo public.** Note this is no longer a "mirror" — party-sync is
-   `origin`, and the `v0.11.0` tag the recipe pins already exists there.
-2. **Add `phoneScreenshots/`.** F-Droid reads
+1. **Add `phoneScreenshots/`.** F-Droid reads
    `fastlane/metadata/android/en-US/images/phoneScreenshots/`, which does not
    exist yet. The ten scenes live in `docs/screenshots/` as `.webp`; copy the
    light-theme set across. F-Droid accepts WebP, but PNG is the safer bet.
    (`title.txt`, `short_description.txt` and `full_description.txt` **are**
    already present — an earlier revision of this file wrongly listed them as
    missing.)
-3. **Validate locally before the MR.** Install `fdroidserver` and run
+2. **Validate locally before the MR.** Install `fdroidserver` and run
    `fdroid build io.github.jonnyczi.copypartyclient`. Expo on F-Droid's Debian
    buildserver is fiddly — expect to iterate. Known rough edges, also noted in
    the recipe's header comment:
@@ -84,11 +83,11 @@ What's left, in order:
 
    The recipe already overrides `gradle.properties` to ship ARM-only, matching
    the GitHub/Play artifacts.
-4. **Prove the build is reproducible** — required by the `Binaries:` decision in
+3. **Prove the build is reproducible** — required by the `Binaries:` decision in
    §2a, and the largest unknown here. Start by pinning `NIX_IMAGE`
    (`.dagger/src/index.ts:44`) to a digest, then build one tag twice and
    `diffoscope` the results.
-5. **Submit** the recipe as a merge request to `gitlab.com/fdroid/fdroiddata`.
+4. **Submit** the recipe as a merge request to `gitlab.com/fdroid/fdroiddata`.
 
 ### 2a. Signing: ship our own binary via `Binaries:` (decided 2026-08-24)
 
@@ -201,6 +200,231 @@ The secrets were copied across on 2026-08-24 without anyone reading the value,
 via a throwaway workflow in the owning repo; see `release-pipeline.md`.
 Cert identity to verify against: SHA-256 `f687d5f0de1f5844…092eb77f`,
 `CN=jonnyczi, O=copyparty-client`.
+
+---
+
+## 5. Certificate pinning / self-signed HTTPS not implemented ⚪
+
+**Symptom.** The server form has always had a certificate SHA-256 field, and the
+README and F-Droid listing used to say "pin a certificate SHA-256 for
+self-signed HTTPS". Nothing enforces it. A self-signed copyparty fails to connect
+whatever is pinned, and a CA the user installed under Settings → Security doesn't
+help either. The worse failure is false confidence: a user may believe the pin
+protects them when it is ignored.
+
+**Where things stand.** As of 2026-10-26 the field is labelled
+*"Certificate SHA-256 (optional, not enforced yet)"* with a hint saying
+self-signed servers can't connect. The README and
+`fastlane/…/full_description.txt` now promise only plain `http://` and
+publicly-trusted HTTPS. The `quickstart-2-add-server` screenshot still shows the
+old label; refresh it with the `readme-screenshots` skill when this lands, or
+sooner.
+
+**Why it doesn't work.**
+- `cert_sha256` is stored (`src/db/servers.ts`), backed up
+  (`src/backup/serialize.ts`), and passed into
+  `testServerConnection`/`testJobConnection` as `certSha256`. Nothing reads it;
+  `src/copyparty/test-connection.ts:12-14` says as much.
+- Every request goes through React Native's `globalThis.fetch`
+  (`src/copyparty/client.ts:78`), i.e. OkHttp with the platform trust store.
+  `CopypartyClientOptions.fetchInit` can't carry a TLS agent on RN (it exists for
+  Node tests), and no caller passes it anyway.
+- There is no `network_security_config`. `plugins/withCleartextTraffic.js` only
+  sets `usesCleartextTraffic`, so with `targetSdk` 36 only **system** CAs are
+  trusted.
+- None of the native modules do any networking.
+
+**Fix direction.** There are two independent pieces:
+1. **Trust user-installed CAs** (cheap): have a config plugin, modelled on
+   `withCleartextTraffic.js`, write a `network_security_config.xml` with
+   `<certificates src="user"/>` in `base-config`. This covers anyone who installs
+   their own CA on the phone.
+2. **Real per-server pinning** (the feature the field promised): install a custom
+   OkHttp client through `OkHttpClientProvider.setOkHttpClientFactory` from a
+   native module. Its `X509TrustManager` should accept a chain whose **leaf
+   certificate** SHA-256 matches the pin for that host, and otherwise defer to the
+   system trust manager. Don't reach for OkHttp's `CertificatePinner`: it pins
+   SPKI hashes, not the certificate hash the field collects, and it runs *after*
+   chain validation, so it can't admit a self-signed cert.
+
+   The host → pin map has to be available natively at process start (e.g.
+   mirrored into SharedPreferences on server save), because headless WorkManager
+   runs use the same fetch with no UI.
+
+Once both pieces land, restore the README / listing claim and the old label.
+
+**How to verify.** Run copyparty with a self-signed cert, `--cert`, on the host,
+and build a **release** APK. Check three cases: a sync fails without a pin;
+succeeds with the right pin; fails with a wrong one. Repeat with the cert's CA
+installed on the device and no pin.
+
+---
+
+## 6. Job-detail screen can hang on an endless spinner (NPE in `NativeDatabase.prepareAsync`) ⚪
+
+**Symptom.** Reproduced on the emulator. Back out of a job's detail screen and
+quickly reopen it: the screen can sit on a spinner forever. Logcat shows a
+`NullPointerException` from `NativeDatabase.prepareAsync`. Force-stopping the app
+recovers it. No data is lost, since the DB file is untouched; only this process's
+connection is broken.
+
+**Why the spinner never ends (confirmed in code).**
+- `app/job/[id]/index.tsx` renders `<ActivityIndicator />` while `job` is null
+  (L135-141).
+- `load()` failures are only `console.warn`ed (L91-95) or swallowed (L98-102).
+  There is no error state and no retry, so a rejected `getJob` leaves `job` null
+  with `notFound` false — a spinner until the screen is next focused, and
+  re-focusing fails the same way.
+- Every mount also fires `load()` twice (focus effect + the `activeRunHere`
+  effect), with no cancellation, so roughly ten queries overlap with the previous
+  screen's.
+- `app/run/[id].tsx` and `app/(tabs)/jobs.tsx` share the warn-and-drop pattern.
+  Only `components/job-form.tsx:172-177` uses a cancelled flag.
+
+**Likely root cause (from reading expo-sqlite 16.0.10 / expo-modules-core; not
+yet proven with a deterministic repro).**
+- `src/sync/headless-entry.ts:26-30` opens a fresh
+  `SQLite.openDatabaseAsync(DB_NAME)` on every periodic tick and never closes it.
+- Ticks also run inside the live app process: `SyncTaskWorker.kt` still runs the
+  tick when an activity is foregrounded.
+- On Android, expo-sqlite's `NativeDatabase` constructor **returns the cached
+  native connection** when the path and options match (`SQLiteModule.kt`,
+  `findCachedDatabase … addRef()`). So the tick's handle and the root
+  `SQLiteProvider`'s handle are two JS objects over **one** native connection.
+- When the tick's orphaned JS handle is garbage-collected,
+  `SharedObjectRegistry.delete` calls `NativeDatabase.sharedObjectDidRelease()`.
+  That runs `ref.close()` → `HybridData.resetNative()` **without checking the
+  refcount and without setting `isClosed`**.
+- The provider's next query passes `maybeThrowForClosedDatabase` and then calls
+  `sqlite3_prepare_v2` on a reset native binding → NPE. Every later query fails
+  the same way until the process restarts.
+- Quick back-and-forth navigation plausibly just supplies the allocation pressure
+  that triggers that GC.
+
+**Fix direction.**
+- Give the tick its own connection and close it: open with
+  `openDatabaseAsync(DB_NAME, { useNewConnection: true })` and `closeAsync()` in a
+  `finally` in `scheduler-register.ts`. Uncached handles can't take the provider's
+  connection down with them.
+- Make the screens fail visibly: an error state with a Retry button instead of an
+  unconditional spinner, a cancelled flag on unmount, and a single load on mount
+  instead of two. Apply the same to `app/run/[id].tsx` and `app/(tabs)/jobs.tsx`.
+- Worth checking whether upstream expo-sqlite has fixed `sharedObjectDidRelease`
+  ignoring the refcount; if not, file it.
+
+**How to verify.** In a dev build with a periodic job enabled, let a foreground
+tick run (or trigger one), then force a GC: Hermes `global.gc?.()` from the
+debugger, or repeatedly open and close job detail. Before the fix this should
+produce the NPE. After it, ticks should leave the provider's connection alone,
+and an injected `getJob` rejection should show an error state, not a spinner.
+
+---
+
+## 7. Release APK crashes at launch on x86_64 (ARM-only, native libs not extracted) ⚪
+
+**Symptom.** Seen on an x86_64 emulator with ARM translation: the release APK
+crashes at launch with `SoLoaderDSONotFoundError: libreactnative.so`. That
+probably affects x86 Chromebooks and Android-on-PC setups. **Untested on real
+hardware.**
+
+**Verified against the published v0.11.0 APK** (2026-10-26):
+- `lib/` holds only `arm64-v8a/` and `armeabi-v7a/` (22 `.so` each).
+- All 44 are `Stored`, i.e. uncompressed.
+- The manifest has `extractNativeLibs=false` (`aapt2 dump xmltree`; minSdk 24,
+  targetSdk 36).
+
+So there is no x86_64 code at all, and the ARM libs are never extracted to disk
+for a translation layer to pick up.
+
+**Why it's ARM-only.** The ABI pair is a CI disk/time measure, not a product
+decision. See `release-pipeline.md` → Known issues: a four-ABI build doubles the
+native compile and the `.cxx` footprint on the ~72 GB runner. It's set in
+`scripts/ci-android-build.sh:29` (`ABIS`), pinned into `gradle.properties` and
+passed as `-P`; the F-Droid recipe applies the same `sed`. Nothing sets
+`useLegacyPackaging`, so AGP's default (uncompressed, unextracted libs at
+minSdk ≥ 23) applies.
+
+**Options.**
+- **Ship x86_64 too.** Add it to `ABIS`. Costs CI time and disk; measure against
+  the runner headroom first. Per-ABI split APKs would keep the download size
+  down, at the cost of more release assets.
+- **Extract the libs.** Set `expo-build-properties`
+  `android.useLegacyPackaging: true` (→ `extractNativeLibs=true`). Cheap for CI,
+  but it relies on the device's ARM translation working through SoLoader; check
+  that it actually fixes the emulator case first.
+
+**Constraint.** Whatever changes must change identically in
+`metadata/io.github.jonnyczi.copypartyclient.yml`. The `Binaries:` decision
+(§2a) needs our APK and F-Droid's build to be byte-identical.
+
+**How to verify.** Install the release APK on an x86_64 AVD (and ideally on a real
+x86 Chromebook) and confirm it launches and syncs.
+
+---
+
+## 8. Remote-path browser: a 403 is a dead end ⚪ (UX)
+
+**Symptom.** The folder browser in the job form opens at the job's current
+remote path, or at copyparty's web root `/` if none is set — not at the
+account's own folder. An account that can only write under, say,
+`/glimslab/...` gets `Access denied for /camera.` (or `for /.`) with only a
+Retry button, and no way to reach a folder it *can* use.
+
+**Why.**
+- `components/remote-path-browser.tsx:67-75` falls back to `/` only on a 404. A
+  403 just sets the error text from `src/copyparty/test-connection.ts:119-123`.
+- `setPath` runs only on success, so Up and Retry go back to the same forbidden
+  path.
+- Nothing knows which volumes the account can reach: `browseFolder`
+  (`src/copyparty/browse.ts`) keeps only `dirs`, `writable` and `acct` from
+  `?ls`.
+- `docs/test-buttons-plan.md` assumed "server root shouldn't 403 with valid
+  auth", which accounts scoped to one volume break.
+
+**Fix direction.**
+- On a 403, show a clearer message ("this account can't open `/camera` — pick or
+  type a folder you can write to") plus a typed-path input inside the browser.
+- Keep the last good path so Up and Retry can't loop.
+- Better default: work out which volumes the account can reach (what copyparty's
+  root `?ls` returns for a scoped account needs checking against the Docker
+  server) and start the browser there.
+
+**How to verify.** Add a third account to `tests/docker-compose.yml` with access
+to a single sub-volume only, and point the browser at `/`.
+
+---
+
+## 9. No automatic resume after a network drop ⚪ (UX)
+
+**Symptom.** If the connection drops mid-run, the run ends **partial** and stays
+that way. Nothing resumes it when the network returns; the next scheduled (or
+manual) sync finishes the job.
+
+**Why.**
+- The engine retries a transient error only about 3 seconds in total
+  (`HTTP_RETRY_ATTEMPTS = 3`, backoff `[1000, 2000]`,
+  `src/sync/engine.ts:23-24,402-419`). After that each file counts as failed and
+  the run ends `partial` (`engine.ts:315-321`).
+- There is no connectivity listener: no netinfo, and `expo-network` is only read
+  once in `src/sync/device-state.ts`.
+- The WorkManager `CONNECTED` constraint (`SyncScheduler.kt`) only gates the
+  periodic tick. The worker returns `Result.success()` whatever the run outcome.
+- `isJobDueForPeriodic` (`src/sync/scheduler.ts:21-33`) counts from the last run
+  of *any* status, so the job then waits its full interval.
+
+**Fix direction.**
+- Classify why a run went partial. Network-only failures (bare fetch rejections
+  or status-less `Up2kError`s) can auto-resume. Per-file errors must not, or a
+  permanent one (e.g. the handshake 422 below) would loop forever.
+- For network-only partials, enqueue a one-shot `OneTimeWorkRequest` for that job
+  with a `CONNECTED` constraint and exponential backoff, reusing the headless
+  tick path, and cap the attempts.
+- Optionally, add an in-app `Network.addNetworkStateListener` for the foreground
+  case.
+
+**How to verify.** Start a large sync on the emulator, toggle airplane mode
+mid-run, then turn it off. The run should end partial and a follow-up run should
+start on reconnect without user action.
 
 ---
 

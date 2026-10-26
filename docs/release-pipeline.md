@@ -66,9 +66,10 @@ keytool -genkeypair -v -keystore upload.keystore -alias upload \
 ```
 
 This is the **upload** key. On Google Play, Play App Signing manages the real
-app-signing key. **F-Droid signs with its own key**, so a package installed from
-F-Droid is not cross-updatable with the Play/GitHub build (a known, accepted
-caveat).
+app-signing key. **F-Droid ships our own signed APK** via the recipe's
+`Binaries:` field (decided 2026-08-24, roadmap §2a), so an F-Droid install stays
+cross-updatable with the GitHub build. That requires F-Droid's from-source build
+to match ours byte for byte, which is not proven yet.
 
 CI secrets used by `release.yml`: `UPLOAD_KEYSTORE_BASE64` (base64 of the
 keystore), `UPLOAD_STORE_PASSWORD`, `UPLOAD_KEY_ALIAS`, `UPLOAD_KEY_PASSWORD`.
@@ -90,18 +91,16 @@ git commit -am "release vX.Y.Z" && git tag vX.Y.Z && git push --tags
 
 - **GitHub Releases** — `.github/workflows/release.yml` on tag `v*`: build signed
   APK + AAB, publish a Release with both + `SHA256SUMS`.
-- **F-Droid** — builds from source on F-Droid's own buildserver (not Dagger/Nix)
-  and signs with its own key. Recipe drafted at
+- **F-Droid** — builds from source on F-Droid's own buildserver (not Dagger/Nix),
+  verifies the result against our published APK and ships ours (`Binaries:`,
+  roadmap §2a). Recipe drafted at
   `metadata/io.github.jonnyczi.copypartyclient.yml`; submit a copy as an MR to
   the `fdroiddata` repo. The non-free-deps gate (`scripts/scan-nonfree-apk.py`, run in
   `ci.yml` on PRs and again in `release.yml` before publishing) guards the de-Googling that makes this possible.
 
-  License is **MIT** (`LICENSE` at repo root). The recipe builds from the public
-  mirror **github.com/jonnyczi/party-sync**.
-
-  **Prerequisite before submitting:** push the source + the `vX.Y.Z` tag to that
-  public GitHub mirror (the canonical self-hosted repo is
-  `dev.jonnyczi-systems.com`).
+  License is **MIT** (`LICENSE` at repo root). The recipe builds from
+  **github.com/jonnyczi/party-sync**, which is public and is `origin` (not a
+  mirror — see roadmap §4). The `vX.Y.Z` tag the recipe pins must be pushed there.
 
   **Validate locally before the MR** (Expo-on-Debian is fiddly — expect to
   iterate): install `fdroidserver`, then
@@ -121,9 +120,11 @@ in the release APK.
 
 ## Known issues / follow-ups
 
-- **Cleartext HTTP is blocked in release builds** — plain `http://` copyparty
-  servers fail at runtime with "Network request failed" (works in dev). Needs a
-  network-security-config decision via `app.json`/config plugin. Not yet fixed.
+- **Open app-level issues** (pinning not enforced, job-detail spinner, x86_64
+  crash, remote-path 403, no auto-resume) are tracked in
+  [`roadmap.md`](./roadmap.md) §5–§9.
+- ~~**Cleartext HTTP is blocked in release builds**~~ — fixed in v0.1.0 by
+  `plugins/withCleartextTraffic.js` (`usesCleartextTraffic=true`); see roadmap §1.
 - **Build caching in CI** — GitHub-hosted runners are ephemeral, so the build
   re-realizes the toolchain each run. The single cache that survives is the **nix
   toolchain**:
@@ -161,7 +162,10 @@ in the release APK.
     native lib for x86/x86_64 too (emulator-only), ~doubling both build time and
     the intermediate `.cxx` footprint. Confirmed via `ccache -s`: 100 cacheable
     C++ calls (2 ABIs) vs 200 (4 ABIs). Interactive `expo run:android` dev builds
-    don't use this script, so the x86_64 emulator keeps all ABIs.
+    don't use this script, so the x86_64 emulator keeps all ABIs. **Cost:** the
+    release APK has no x86_64 libs and doesn't extract its ARM ones, so it
+    crashes at launch on x86_64 with ARM translation (x86 Chromebooks,
+    Android-on-PC) — see roadmap §7.
   - When the disk fills it crashes the runner's own log worker
     (`No space left on device: …/Worker_*.log`), which is why a disk-overflowing
     build job uploads **no step logs** — check the job-level failure annotation
