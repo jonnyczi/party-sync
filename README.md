@@ -220,6 +220,27 @@ See [docs/release-pipeline.md](docs/release-pipeline.md) for signing, CI, and th
 F-Droid-friendly build gates. Versions are bumped with `npm run bump-version`;
 tagging `vX.Y.Z` publishes a GitHub Release.
 
+## Why I built this
+
+I wanted my phone to back up to my own copyparty server, and none of the existing
+options worked the way I wanted. So I built Party Sync. My family and I rely on it to
+back up our phones.
+
+I've been a professional developer for 15+ years, and I built it with a lot of help
+from Claude Code. I review and test everything that ships, so if something's broken,
+that's on me. Please [file an issue](https://github.com/jonnyczi/party-sync/issues).
+
+## Support the project
+
+Party Sync is free and always will be. If it saves your photos, you can chip in to
+support its development:
+
+- [GitHub Sponsors](https://github.com/sponsors/jonnyczi)
+- [Liberapay](https://liberapay.com/jonnyczi)
+- [PayPal](https://paypal.me/jonnyczi)
+
+Bug reports and feature ideas help just as much.
+
 ## License
 
 [MIT](LICENSE)
